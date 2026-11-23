@@ -162,9 +162,14 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   left: 0;
   right: 0;
   bottom: calc(64px + env(safe-area-inset-bottom));
-  height: min(42vh, 440px);
+  height: min(62vh, 560px);
+  max-height: calc(100dvh - 5.4rem - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   background: var(--paper);
   border-radius: 18px 18px 0 0;
   box-shadow: 0 -10px 30px var(--shadow);
@@ -186,7 +191,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .primary button { flex: 1 1 8.5rem; }
 #next-hour, .hint, .when, .muted, .empty { color: var(--muted); }
 #next-hour, #torch-detail { margin: 0.35rem 0.8rem 0; font-size: 0.9rem; }
-.sheet-body { overflow: auto; padding: 0.4rem 0.9rem 1rem; }
+.sheet-body {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding: 0.4rem 0.9rem 1rem;
+}
 .kicker { margin: 0; color: var(--copper); font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .stay, .empty-card { border-top: 1px solid var(--line); padding: 0.75rem 0; }
 .stay h3, .empty-card h3, .photo-day h3 { margin: 0.15rem 0; font-size: 1.05rem; }
