@@ -34,7 +34,7 @@ function current() {
 function actionButton(name, label, count, pressed) {
   return `<button type="button" class="reel-action" data-action="${name}" aria-pressed="${pressed ? "true" : "false"}" aria-label="${escapeAttr(label)}">
     ${iconSvg(iconFor(name, pressed))}
-    <span class="reel-action-label">${escapeHtml(label)}</span>
+    <span class="reel-action-label sr-only">${escapeHtml(label)}</span>
     <span class="reel-action-count">${escapeHtml(formatReelCount(count))}</span>
   </button>`;
 }
@@ -55,7 +55,7 @@ function renderFeed() {
       return `<article class="reel is-paused" data-index="${index}" data-id="${escapeAttr(reel.id)}" aria-label="${escapeAttr(label)}">
         <video poster="${escapeAttr(reel.poster)}" src="${escapeAttr(reel.video)}" playsinline loop muted preload="${index < 2 ? "auto" : "metadata"}"></video>
         <p class="reel-fallback" hidden>This reel could not play. Swipe to the next one.</p>
-        <button type="button" class="reel-play" aria-label="Play or pause">${iconSvg("PlayIcon")}<span>Play</span></button>
+        <button type="button" class="reel-play" aria-label="Play or pause">${iconSvg("PlayIcon")}<span class="sr-only">Play</span></button>
         <label class="reel-scrub"><span class="sr-only">Seek</span>
           <span class="reel-time">0:00</span>
           <input type="range" min="0" max="1000" value="0" aria-valuemin="0" aria-valuemax="1000" />
@@ -286,25 +286,29 @@ function drawComments(reel, query) {
       <h2 id="reels-comments-title">Comments</h2>
       <button type="button" id="reels-comments-close">Close</button>
     </header>
-    <label class="reels-search">Search comments
-      <input id="reels-comment-search" type="search" value="${escapeAttr(query)}" placeholder="Name or words" />
+    <label class="reels-search"><span class="sr-only">Search comments</span>
+      <input id="reels-comment-search" type="search" value="${escapeAttr(query)}" placeholder="Search comments" />
     </label>
     <div class="reels-comment-list" tabindex="0">
       ${
         shown.length
           ? shown
-              .map(
-                (comment) => `<article class="reels-comment">
-                  <p><strong>${escapeHtml(comment.author)}</strong> ${escapeHtml(comment.text)}</p>
-                  ${comment.mine ? `<button type="button" data-delete="${escapeAttr(comment.id)}">Delete</button>` : `<p class="reel-note">With reel</p>`}
-                </article>`,
-              )
+              .map((comment) => {
+                const letter = escapeHtml(String(comment.author || "?").trim().charAt(0).toUpperCase() || "?");
+                return `<article class="reels-comment">
+                  <span class="reels-avatar" aria-hidden="true">${letter}</span>
+                  <div>
+                    <p><strong>${escapeHtml(comment.author)}</strong>${escapeHtml(comment.text)}</p>
+                  </div>
+                  ${comment.mine ? `<button type="button" data-delete="${escapeAttr(comment.id)}">Delete</button>` : ""}
+                </article>`;
+              })
               .join("")
           : `<p class="reel-note">No matching comments. Add one below. Comments stay on this device.</p>`
       }
     </div>
     <form class="reels-composer" id="reels-comment-form">
-      <label>Add a comment
+      <label><span class="sr-only">Add a comment</span>
         <input id="reels-comment-text" type="text" maxlength="280" placeholder="Add a comment" />
       </label>
       <button type="submit">Send</button>
@@ -350,15 +354,15 @@ function openShare(id, payload) {
       <h2 id="reels-share-title">Share</h2>
       <button type="button" id="reels-share-close">Close</button>
     </header>
-    <p class="reel-note">${escapeHtml(reel.title)}. The link stays on this device. Nothing is uploaded.</p>
+    <p class="reel-note">${escapeHtml(reel.title)}. Stays on this device.</p>
     <p class="reels-link">${escapeHtml(link)}</p>
     <div class="reels-share-actions">
       <button type="button" id="reels-copy">${iconSvg("Copy01Icon")}<span>Copy link</span></button>
       <button type="button" id="reels-system">${iconSvg("Share08Icon")}<span>Share</span></button>
     </div>
     <form id="reels-reshare-form">
-      <label>Reshare note
-        <input id="reels-reshare-note" type="text" maxlength="180" value="${escapeAttr(reel.note || "")}" placeholder="Add a short note" />
+      <label><span class="sr-only">Reshare note</span>
+        <input id="reels-reshare-note" type="text" maxlength="180" value="${escapeAttr(reel.note || "")}" placeholder="Add a note" />
       </label>
       <button type="submit">${reel.reshared ? "Update reshare" : "Reshare"}</button>
       <button type="button" id="reels-undo" ${reel.reshared ? "" : "hidden"}>Undo reshare</button>
@@ -465,7 +469,7 @@ export async function mountReels() {
       booted = true;
       const card = feedEl.querySelector(`[data-index="${active}"]`);
       card?.scrollIntoView();
-      setReelStatus("Swipe up or down. Nothing is uploaded.");
+      setReelStatus("Nothing is uploaded.");
       requestAnimationFrame(placeChrome);
     } catch (error) {
       setReelStatus(error?.message || "The reels could not be opened.");

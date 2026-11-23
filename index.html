@@ -13,12 +13,12 @@
 
   <header class="appbar">
     <div class="appbar-title">
-      <p class="eyebrow">Location journal</p>
-      <p id="status" role="status" data-kind="idle">Opening…</p>
+      <p class="eyebrow"><span class="eyebrow-full">Location journal</span><span class="eyebrow-short">Journal</span></p>
     </div>
     <p id="live-chip" class="chip" data-kind="idle">Paused</p>
     <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
     <button id="more-toggle" type="button" aria-expanded="false" aria-controls="more-panel">More</button>
+    <p id="status" role="status" data-kind="idle">Opening…</p>
   </header>
   <div id="more-panel" class="menu" hidden>
     <button id="load-mock" type="button">Load sample day</button>
@@ -75,11 +75,11 @@
   </section>
 
   <nav class="bottom-nav" aria-label="Sections">
-    <button type="button" class="tab is-on" data-tab="route" aria-current="page">Route</button>
-    <button type="button" class="tab" data-tab="stays">Stays</button>
-    <button type="button" class="tab" data-tab="photos">Photos</button>
-    <button type="button" class="tab" data-tab="log">Hourly</button>
-    <button type="button" class="tab" data-tab="reels">Reels</button>
+    <button type="button" class="tab is-on" data-tab="route" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5 9.5 9 14.5 6 20 8.5V18l-5.5-2.5L9.5 18 4 15.5Z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M9.5 9v9M14.5 6v9.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg><span>Route</span></button>
+    <button type="button" class="tab" data-tab="stays"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.1 6-10a6 6 0 1 0-12 0c0 4.9 6 10 6 10Z" fill="none" stroke="currentColor" stroke-width="1.75"/><circle cx="12" cy="11" r="2" fill="none" stroke="currentColor" stroke-width="1.75"/></svg><span>Stays</span></button>
+    <button type="button" class="tab" data-tab="photos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.75"/><circle cx="9" cy="10" r="1.4" fill="currentColor"/><path d="m7 16 3.2-3.2a1 1 0 0 1 1.4 0L16 17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg><span>Photos</span></button>
+    <button type="button" class="tab" data-tab="log"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 8v4.5l3 1.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg><span>Hourly</span></button>
+    <button type="button" class="tab" data-tab="reels"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="m10 9 5 3-5 3Z" fill="currentColor"/></svg><span>Reels</span></button>
   </nav>
 
   <section id="reels-screen" class="reels-screen" hidden aria-label="Reels">

@@ -108,6 +108,6 @@ export function torchView(state) {
     case "unsupported":
       return { pressed: false, disabled: true, text: "No flashlight", detail: "This device has no flashlight." };
     default:
-      return { pressed: false, disabled: true, text: "Flashlight unavailable", detail: "Flashlight control is available in the Android app." };
+      return { pressed: false, disabled: true, text: "Flashlight", detail: "Flashlight control is available in the Android app." };
   }
 }

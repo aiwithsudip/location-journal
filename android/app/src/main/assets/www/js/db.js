@@ -1,7 +1,7 @@
 import { upgradePlan } from "./settings.js";
 
 const DB_NAME = "location-journal";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -22,6 +22,13 @@ function openDb() {
       if (plan.indexPhotosByTime && db.objectStoreNames.contains("photos")) {
         const photos = request.transaction.objectStore("photos");
         if (!photos.indexNames.contains("byTime")) photos.createIndex("byTime", "t");
+      }
+      if (plan.createReelState && !db.objectStoreNames.contains("reelState")) {
+        db.createObjectStore("reelState", { keyPath: "id" });
+      }
+      if (plan.createReelComments && !db.objectStoreNames.contains("reelComments")) {
+        const comments = db.createObjectStore("reelComments", { keyPath: "id" });
+        comments.createIndex("byReel", "reelId");
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -93,5 +100,31 @@ export async function getMeta(key) {
 export function setMeta(key, value) {
   return withStore("meta", "readwrite", (store) => {
     store.put({ key, value });
+  });
+}
+
+export function getAllReelStates() {
+  return withStore("reelState", "readonly", (store) => requestToPromise(store.getAll()));
+}
+
+export function putReelState(row) {
+  return withStore("reelState", "readwrite", (store) => {
+    store.put(row);
+  });
+}
+
+export function getAllReelComments() {
+  return withStore("reelComments", "readonly", (store) => requestToPromise(store.getAll()));
+}
+
+export function putReelComment(row) {
+  return withStore("reelComments", "readwrite", (store) => {
+    store.put(row);
+  });
+}
+
+export function deleteReelComment(id) {
+  return withStore("reelComments", "readwrite", (store) => {
+    store.delete(id);
   });
 }

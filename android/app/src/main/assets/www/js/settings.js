@@ -35,6 +35,8 @@ export function upgradePlan(oldVersion) {
     createPhotos: version < 1,
     createMeta: version < 1,
     indexPhotosByTime: version < 2,
+    createReelState: version < 3,
+    createReelComments: version < 3,
     deletesStores: false,
   };
 }

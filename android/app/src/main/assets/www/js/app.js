@@ -12,6 +12,7 @@ import { deletePhoto, deletePoint, getAllPhotos, getAllPoints, getMeta, putPhoto
 import { parseJpegExif } from "./exif.js";
 import { buildMockTrip } from "./mock.js";
 import { formatDistanceUnits, mergeSettings } from "./settings.js";
+import { mountReels, pauseReels } from "./reels-ui.js";
 import {
   buildBackup,
   buildGpx,
@@ -1214,6 +1215,7 @@ function setMenu(open) {
 }
 
 function showTab(name) {
+  document.body.classList.toggle("is-reels", name === "reels");
   document.querySelectorAll(".tab").forEach((item) => {
     const on = item.dataset.tab === name;
     item.classList.toggle("is-on", on);
@@ -1223,6 +1225,12 @@ function showTab(name) {
   for (const panel of ["route", "stays", "photos", "log"]) {
     document.querySelector(`#panel-${panel}`).hidden = panel !== name;
   }
+  if (name === "reels") {
+    setMenu(false);
+    const camera = document.querySelector("#camera-sheet");
+    if (camera && !camera.hidden) document.querySelector("#close-camera").click();
+    void mountReels();
+  } else pauseReels();
 }
 
 moreToggle.addEventListener("click", () => setMenu(morePanel.hidden));
