@@ -1,0 +1,48 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "app.locationjournal"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "app.locationjournal"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+tasks.register("syncWeb", Copy) {
+    from "../../"
+    include "index.html", "css/**", "js/app.js", "js/db.js", "js/exif.js", "js/geo.js"
+    into "src/main/assets/www"
+}
+
+tasks.named("preBuild").configure { dependsOn("syncWeb") }
+
+configurations.configureEach {
+    exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
+    exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
+}
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.11.0"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "androidx.activity:activity:1.9.2"
+    implementation "androidx.core:core:1.13.1"
+}
