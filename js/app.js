@@ -380,20 +380,28 @@ function focusMap(lat, lng) {
 }
 
 function renderMap(stays, trail) {
+  if (typeof L === "undefined") throw new Error("Map library failed to load.");
   if (!map) {
     map = L.map("map", { zoomControl: true, scrollWheelZoom: true });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: "&copy; OpenStreetMap &copy; CARTO",
-      subdomains: "abcd",
+    const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap",
       maxZoom: 19,
     }).addTo(map);
+    const mapError = document.querySelector("#map-error");
+    tiles.on("tileerror", () => {
+      mapError.hidden = false;
+    });
+    tiles.on("tileload", () => {
+      mapError.hidden = true;
+    });
     pathLayer = L.layerGroup().addTo(map);
     stayLayer = L.layerGroup().addTo(map);
     map.on("dragstart", () => {
       follow = false;
       followBtn.setAttribute("aria-pressed", "false");
     });
-    map.setView([27.66, 84.42], 12);
+    map.setView([27.663, 84.425], 13);
+    requestAnimationFrame(() => map.invalidateSize());
   }
   pathLayer.clearLayers();
   stayLayer.clearLayers();
@@ -453,7 +461,11 @@ function render() {
   renderLog(hourly);
   renderStays(stays, placed);
   renderLoose(loose, photos);
-  renderMap(stays, trail);
+  try {
+    renderMap(stays, trail);
+  } catch (error) {
+    setStatus(error.message || "The map could not be drawn.", "bad");
+  }
   document.querySelector("#stay-count").textContent = String(stays.length);
   document.querySelector("#fix-count").textContent = String(trail.length);
   document.querySelector("#photo-count").textContent = String(photos.length);
@@ -734,6 +746,13 @@ async function clearPhotos() {
   setStatus("Saved photo copies were removed. Your gallery is unchanged.", "ok");
   render();
 }
+
+document.querySelector("#more-toggle").addEventListener("click", () => {
+  const panel = document.querySelector("#more-panel");
+  const open = panel.hidden;
+  panel.hidden = !open;
+  document.querySelector("#more-toggle").setAttribute("aria-expanded", String(open));
+});
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
