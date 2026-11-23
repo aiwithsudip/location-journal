@@ -67,25 +67,29 @@ function u32(n) {
 }
 const date = "2024:06:05 14:03:02\0";
 const dateBytes = [...date].map((ch) => ch.charCodeAt(0));
+const ifd0Size = 8 + 2 + 12 * 2 + 4;
+const exifPointer = ifd0Size;
+const datePointer = exifPointer + 2 + 12 + 4;
+const gpsPointer = datePointer + dateBytes.length;
 const tiff = [
   0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
   ...u16(2),
-  ...u16(0x8769), ...u16(4), ...u32(1), ...u32(0x3e),
-  ...u16(0x8825), ...u16(4), ...u32(1), ...u32(0x58),
+  ...u16(0x8769), ...u16(4), ...u32(1), ...u32(exifPointer),
+  ...u16(0x8825), ...u16(4), ...u32(1), ...u32(gpsPointer),
   ...u32(0),
 ];
-assert.equal(8 + 2 + 24 + 4, 0x3e);
+assert.equal(tiff.length, ifd0Size);
 const exifIfd = [
   ...u16(1),
-  ...u16(0x9003), ...u16(2), ...u32(dateBytes.length), ...u32(0x50),
+  ...u16(0x9003), ...u16(2), ...u32(dateBytes.length), ...u32(datePointer),
   ...u32(0),
   ...dateBytes,
 ];
-assert.equal(0x3e + 2 + 12 + 4, 0x50);
+assert.equal(datePointer, exifPointer + 2 + 12 + 4);
 const rationals = [];
 const rats = [37, 1, 46, 1, 12, 1, 122, 1, 25, 1, 30, 1];
 for (const n of rats) rationals.push(...u32(n));
-const gpsIfdStart = 0x64;
+const gpsIfdStart = gpsPointer;
 const gpsData = gpsIfdStart + 2 + 12 * 4 + 4;
 const gpsIfd = [
   ...u16(4),
@@ -97,7 +101,7 @@ const gpsIfd = [
   ...rationals,
 ];
 const tiffBytes = [...tiff, ...exifIfd, ...gpsIfd];
-assert.equal(tiff.length, 0x3e);
+assert.equal(tiff.length + exifIfd.length, gpsPointer);
 const app1Body = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, ...tiffBytes];
 const app1Size = app1Body.length + 2;
 const jpeg = [0xff, 0xd8, 0xff, 0xe1, (app1Size >> 8) & 255, app1Size & 255, ...app1Body, 0xff, 0xd9];

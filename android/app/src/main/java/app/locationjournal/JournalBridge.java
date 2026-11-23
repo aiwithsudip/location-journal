@@ -38,4 +38,14 @@ public final class JournalBridge {
     public void ensureCamera() {
         activity.runOnUiThread(activity::askCamera);
     }
+
+    @JavascriptInterface
+    public String torchState() {
+        return activity.torchState();
+    }
+
+    @JavascriptInterface
+    public String setTorch(boolean on) {
+        return activity.requestTorch(on);
+    }
 }

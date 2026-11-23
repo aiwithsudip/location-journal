@@ -1,7 +1,6 @@
 import {
   detectStays,
   formatClock,
-  formatDistance,
   formatDuration,
   formatWhen,
   haversineMeters,
@@ -12,6 +11,17 @@ import {
 import { deletePhoto, deletePoint, getAllPhotos, getAllPoints, getMeta, putPhoto, putPoint, setMeta } from "./db.js";
 import { parseJpegExif } from "./exif.js";
 import { buildMockTrip } from "./mock.js";
+import { formatDistanceUnits, mergeSettings } from "./settings.js";
+import {
+  buildBackup,
+  buildGpx,
+  filterPhotos,
+  groupPhotos,
+  photoCopyDeleteWarning,
+  planPhotoImport,
+  planRestore,
+  torchView,
+} from "./backup.js";
 
 const SAMPLE_MS = 20 * 1000;
 const GEO_OPTIONS = { enableHighAccuracy: true, maximumAge: 15 * 1000, timeout: 20 * 1000 };
@@ -23,6 +33,7 @@ const logEl = document.querySelector("#hourly-log");
 const staysEl = document.querySelector("#stays");
 const looseEl = document.querySelector("#loose");
 const routeEl = document.querySelector("#panel-route");
+const photoGrid = document.querySelector("#photo-grid");
 const trackBtn = document.querySelector("#toggle-tracking");
 const recordBtn = document.querySelector("#record-now");
 const photoInput = document.querySelector("#photo-input");
@@ -33,6 +44,11 @@ const followBtn = document.querySelector("#follow-map");
 const replayBtn = document.querySelector("#replay");
 const cameraSheet = document.querySelector("#camera-sheet");
 const cameraPreview = document.querySelector("#camera-preview");
+const morePanel = document.querySelector("#more-panel");
+const moreToggle = document.querySelector("#more-toggle");
+const viewer = document.querySelector("#viewer");
+const settingsScreen = document.querySelector("#settings-screen");
+const searchInput = document.querySelector("#photo-search");
 
 let map;
 let stayLayer;
@@ -40,27 +56,46 @@ let pathLayer;
 let replayMarker;
 let tracking = false;
 let follow = false;
+let locationBlocked = false;
 let sampleTimer = 0;
 let hourTimer = 0;
 let photoTimer = 0;
 let replayTimer = 0;
 let points = [];
 let photos = [];
+let settings = mergeSettings();
+let annotations = {};
 let objectUrls = [];
+let galleryUrls = [];
+let viewerUrl = "";
 let nameCache = {};
 let cameraStream = null;
 let mapReady = false;
+let selecting = false;
+let selectedIds = new Set();
+let visiblePhotos = [];
+let viewerIndex = -1;
 
 function setStatus(text, kind) {
   statusEl.textContent = text;
   statusEl.dataset.kind = kind ?? "idle";
-  chipEl.textContent = tracking ? "Tracking" : kind === "busy" ? "Working" : "Idle";
-  chipEl.dataset.kind = tracking ? "ok" : kind ?? "idle";
+  paintChip();
+}
+
+function paintChip() {
+  chipEl.textContent = tracking ? "Tracking" : "Paused";
+  chipEl.dataset.kind = tracking ? "ok" : "idle";
 }
 
 function releaseUrls() {
   for (const url of objectUrls) URL.revokeObjectURL(url);
   objectUrls = [];
+  releaseGallery();
+}
+
+function releaseGallery() {
+  for (const url of galleryUrls) URL.revokeObjectURL(url);
+  galleryUrls = [];
 }
 
 function nativeJournal() {
@@ -68,7 +103,7 @@ function nativeJournal() {
 }
 
 function trailPoints() {
-  const samples = points.filter((p) => p.kind === "sample");
+  const samples = points.filter((point) => point.kind === "sample");
   return (samples.length ? samples : points).slice().sort((a, b) => a.t - b.t);
 }
 
@@ -101,7 +136,7 @@ async function saveFix(position, { hourly }) {
   await putPoint(sample);
   const key = hourKey(t);
   const hourlyId = `hourly:${key}`;
-  const existing = points.find((p) => p.id === hourlyId);
+  const existing = points.find((point) => point.id === hourlyId);
   let hourlyPoint = existing;
   if (hourly || !existing) {
     hourlyPoint = {
@@ -115,7 +150,7 @@ async function saveFix(position, { hourly }) {
     };
     await putPoint(hourlyPoint);
   }
-  const byId = new Map(points.map((p) => [p.id, p]));
+  const byId = new Map(points.map((point) => [point.id, point]));
   byId.set(sample.id, sample);
   if (hourlyPoint) byId.set(hourlyPoint.id, hourlyPoint);
   points = [...byId.values()];
@@ -132,7 +167,7 @@ function syncNativePoints() {
   } catch {
     incoming = [];
   }
-  const byId = new Map(points.map((p) => [p.id, p]));
+  const byId = new Map(points.map((point) => [point.id, point]));
   const writes = [];
   for (const point of incoming) {
     if (!point || !point.id || byId.has(point.id)) continue;
@@ -147,13 +182,25 @@ function syncNativePoints() {
 
 async function takeFix(reason) {
   const native = nativeJournal();
+  if (!native && locationBlocked) {
+    setStatus("Location permission is off. Allow it in the browser site settings, then start tracking again.", "bad");
+    if (tracking) await setTracking(false);
+    return false;
+  }
   if (native) {
     setStatus("Finding your location…", "busy");
     native.requestFix(reason);
     await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 30000);
+      const restore = () => {
+        window.__onNativePoints = () => syncNativePoints();
+      };
+      const timer = setTimeout(() => {
+        restore();
+        resolve();
+      }, 30000);
       window.__onNativePoints = async () => {
         clearTimeout(timer);
+        restore();
         await syncNativePoints();
         resolve();
       };
@@ -162,17 +209,24 @@ async function takeFix(reason) {
     if (saved) setStatus(`Position saved. ${formatWhen(saved.t)}.`, "ok");
     else setStatus("Still waiting for a GPS fix. Keep location on.", "busy");
     if (tracking) nextEl.textContent = "A fix is saved about every 20 seconds, plus one each hour.";
-    return;
+    return Boolean(saved);
   }
   setStatus("Finding your location…", "busy");
   try {
     const position = await currentPosition();
     const saved = await saveFix(position, { hourly: reason === "this hour" || reason === "now" });
     setStatus(`Position saved. ${formatWhen(saved.t)}.`, "ok");
-    if (saved.kind !== "hourly") scheduleHourly();
-    else scheduleHourly();
+    scheduleHourly();
+    return Boolean(saved);
   } catch (error) {
+    if (error?.code === 1) {
+      locationBlocked = true;
+      setStatus("Location permission is off. Allow it in the browser site settings, then start tracking again.", "bad");
+      if (tracking) await setTracking(false);
+      return false;
+    }
     setStatus(error?.message || "Location was denied or unavailable.", "bad");
+    return false;
   }
 }
 
@@ -199,6 +253,7 @@ async function setTracking(on) {
   trackBtn.setAttribute("aria-pressed", String(on));
   clearInterval(sampleTimer);
   clearTimeout(hourTimer);
+  paintChip();
   if (!on) {
     if (nativeJournal()) nativeJournal().setTracking(false);
     follow = false;
@@ -207,8 +262,8 @@ async function setTracking(on) {
     setStatus("Tracking is paused.", "idle");
     return;
   }
-  follow = true;
-  followBtn.setAttribute("aria-pressed", "true");
+  follow = settings.followOnStart;
+  followBtn.setAttribute("aria-pressed", String(follow));
   if (nativeJournal()) {
     nativeJournal().setTracking(true);
     document.querySelector("#stay-hint").textContent =
@@ -221,31 +276,43 @@ async function setTracking(on) {
     return;
   }
   const key = hourKey(Date.now());
-  const haveHour = points.some((p) => p.id === `hourly:${key}`);
+  const haveHour = points.some((point) => point.id === `hourly:${key}`);
   await takeFix(haveHour ? "sample" : "this hour");
+  if (!tracking) return;
   sampleTimer = setInterval(() => {
     if (tracking) void takeFix("sample");
   }, SAMPLE_MS);
 }
 
 function escapeHtml(value) {
-  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
+function placeName(stay) {
+  const note = annotations[stay.id] || {};
+  return note.title || nameCache[stay.id] || `${stay.lat.toFixed(4)}, ${stay.lng.toFixed(4)}`;
+}
+
+function photoLabel(photo) {
+  const when = photo.t ? formatWhen(photo.t) : "Undated photo";
+  const place = photo.place || (photo.lat != null && photo.lng != null ? `${Number(photo.lat).toFixed(4)}, ${Number(photo.lng).toFixed(4)}` : "");
+  return [photo.caption, photo.label, when, place].filter(Boolean).join(", ");
+}
+
 function slideshowHtml(items, label) {
   if (items.length === 0) {
-    return `<p class="empty-photos">No photos for this stop yet. Use Take photo, auto photo, or the gallery.</p>`;
+    return `<p class="empty-photos">No photos for this stop yet. Use Add photo, or choose pictures. The app keeps a copy.</p>`;
   }
   const slides = items
     .map((photo, index) => {
       const url = URL.createObjectURL(photo.blob);
       objectUrls.push(url);
-      const when = photo.t ? formatWhen(photo.t) : photo.name;
+      const when = photo.caption || (photo.t ? formatWhen(photo.t) : photo.name);
       return `<figure class="slide${index === 0 ? " is-active" : ""}">
-        <img src="${url}" alt="${escapeAttr(photo.name)}" />
+        <img src="${url}" alt="${escapeAttr(photoLabel(photo))}" />
         <figcaption>${escapeHtml(when)}</figcaption>
       </figure>`;
     })
@@ -253,7 +320,7 @@ function slideshowHtml(items, label) {
   return `<div class="slideshow" aria-label="${escapeAttr(label)}">
     <div class="slides">${slides}</div>
     <div class="slide-controls">
-      <button type="button" class="prev">Prev</button>
+      <button type="button" class="prev">Previous</button>
       <span class="slide-count">1 / ${items.length}</span>
       <button type="button" class="next">Next</button>
     </div>
@@ -296,7 +363,7 @@ function renderRoute(trail) {
   routeEl.innerHTML = recent
     .map(
       (point) => `<button type="button" class="route-item" data-lat="${point.lat}" data-lng="${point.lng}">
-        <span class="dot"></span>
+        <span class="dot" aria-hidden="true"></span>
         <span><strong>${formatWhen(point.t)}</strong><br><span class="muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</span></span>
         <span class="muted">±${point.accuracy ?? "?"} m</span>
       </button>`,
@@ -311,7 +378,7 @@ function renderRoute(trail) {
 
 function renderStays(stays, placed) {
   if (stays.length === 0) {
-    staysEl.innerHTML = `<article class="empty-card"><h3>No stays of 30 minutes yet</h3><p>Stand in one area while tracking is on. After half an hour the place appears here with its photos.</p></article>`;
+    staysEl.innerHTML = `<article class="empty-card"><h3>No stays of 30 minutes yet</h3><p>Stay in one area while tracking is on. After half an hour the place appears here with its photos.</p></article>`;
     return;
   }
   staysEl.innerHTML = stays
@@ -319,14 +386,19 @@ function renderStays(stays, placed) {
     .reverse()
     .map((stay) => {
       const photosHere = placed.get(stay.id) ?? [];
-      const name = nameCache[stay.id] || `${stay.lat.toFixed(4)}, ${stay.lng.toFixed(4)}`;
+      const name = placeName(stay);
+      const note = annotations[stay.id] || {};
       return `<article class="stay" id="${stay.id}">
         <header>
-          <p class="kicker">${formatDuration(stay.duration)} · ${stay.samples} fixes</p>
+          <p class="kicker">${formatDuration(stay.duration)} · ${stay.samples} fixes${note.favorite ? " · Favorite" : ""}</p>
           <h3>${escapeHtml(name)}</h3>
           <p class="when">${formatWhen(stay.start)} – ${formatClock(stay.end)}</p>
           <button type="button" class="ghost jump" data-lat="${stay.lat}" data-lng="${stay.lng}">Show on map</button>
         </header>
+        <label>Title<input class="stay-title" data-stay="${escapeAttr(stay.id)}" type="text" maxlength="80" value="${escapeAttr(note.title || "")}" /></label>
+        <label>Note<input class="stay-note" data-stay="${escapeAttr(stay.id)}" type="text" maxlength="160" value="${escapeAttr(note.note || "")}" /></label>
+        <label>Label<input class="stay-label" data-stay="${escapeAttr(stay.id)}" type="text" maxlength="40" value="${escapeAttr(note.label || "")}" /></label>
+        <button type="button" class="ghost stay-fav" data-stay="${escapeAttr(stay.id)}" aria-pressed="${note.favorite ? "true" : "false"}">${note.favorite ? "Favorited" : "Favorite"}</button>
         ${slideshowHtml(photosHere, `Photos from ${name}`)}
       </article>`;
     })
@@ -334,46 +406,102 @@ function renderStays(stays, placed) {
   staysEl.querySelectorAll(".jump").forEach((button) => {
     button.addEventListener("click", () => focusMap(Number(button.dataset.lat), Number(button.dataset.lng)));
   });
+  staysEl.querySelectorAll(".stay-title, .stay-note, .stay-label").forEach((input) => {
+    input.addEventListener("change", () => {
+      const id = input.dataset.stay;
+      const field = input.classList.contains("stay-title") ? "title" : input.classList.contains("stay-note") ? "note" : "label";
+      annotations[id] = { ...(annotations[id] || {}), [field]: input.value.trim() };
+      void setMeta("annotations", annotations);
+      if (field === "title") {
+        const heading = input.closest(".stay")?.querySelector("h3");
+        if (heading) heading.textContent = input.value.trim() || nameCache[id] || heading.textContent;
+      }
+    });
+  });
+  staysEl.querySelectorAll(".stay-fav").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.stay;
+      const favorite = button.getAttribute("aria-pressed") !== "true";
+      annotations[id] = { ...(annotations[id] || {}), favorite };
+      button.setAttribute("aria-pressed", String(favorite));
+      button.textContent = favorite ? "Favorited" : "Favorite";
+      void setMeta("annotations", annotations);
+    });
+  });
   wireSlideshows(staysEl);
 }
 
-function renderLoose(loose, allPhotos) {
-  const album = allPhotos.slice().sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
-  if (album.length === 0) {
-    looseEl.innerHTML = `<article class="empty-card"><h3>No photos yet</h3><p>Take one with the camera, turn on auto photo, or add pictures from the gallery.</p></article>`;
+function renderPhotos() {
+  releaseGallery();
+  const filtered = filterPhotos(photos, searchInput.value);
+  visiblePhotos = filtered;
+  if (photos.length === 0) {
+    photoGrid.innerHTML = `<article class="empty-card"><h3>No photos yet</h3><p>Use Add photo, or choose pictures. This gallery stores a copy. Photos already in your gallery stay there.</p></article>`;
+    looseEl.innerHTML = "";
     return;
   }
-  looseEl.innerHTML = `<article class="stay">
-      <header><p class="kicker">${album.length} saved</p><h3>All photos</h3></header>
-      ${slideshowHtml(album, "All photos")}
-    </article>
-    ${
-      loose.length
-        ? `<article class="stay"><header><p class="kicker">${loose.length} unmatched</p><h3>Not tied to a stay</h3></header>${slideshowHtml(loose, "Unmatched photos")}</article>`
-        : ""
-    }`;
-  wireSlideshows(looseEl);
+  if (filtered.length === 0) {
+    photoGrid.innerHTML = `<article class="empty-card"><h3>No matching photos</h3><p>Try another date, caption, or label.</p></article>`;
+    looseEl.innerHTML = "";
+    return;
+  }
+  photoGrid.innerHTML = groupPhotos(filtered)
+    .map(
+      (group) => `<section class="photo-day"><h3>${escapeHtml(group.day)}</h3><div class="photo-row">${group.items
+        .map((photo) => {
+          const url = photo.blob ? URL.createObjectURL(photo.blob) : "";
+          if (url) galleryUrls.push(url);
+          const selected = selectedIds.has(photo.id);
+          return `<button type="button" class="photo-tile${selected ? " is-selected" : ""}" data-id="${escapeAttr(photo.id)}" aria-pressed="${selected ? "true" : "false"}" aria-label="${escapeAttr(photoLabel(photo))}">
+            ${url ? `<img src="${url}" alt="" />` : ""}
+            <span>${escapeHtml(photo.caption || photo.label || (photo.t ? formatClock(photo.t) : "Photo"))}${photo.favorite ? " · Favorite" : ""}</span>
+          </button>`;
+        })
+        .join("")}</div></section>`,
+    )
+    .join("");
+  photoGrid.querySelectorAll(".photo-tile").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.id;
+      if (selecting) {
+        if (selectedIds.has(id)) selectedIds.delete(id);
+        else selectedIds.add(id);
+        const on = selectedIds.has(id);
+        button.setAttribute("aria-pressed", String(on));
+        button.classList.toggle("is-selected", on);
+        return;
+      }
+      openViewer(id);
+    });
+  });
+  const loose = matchPhotos(detectStays(points), filtered).loose;
+  looseEl.innerHTML = loose.length
+    ? `<p class="hint">${loose.length} shown photo${loose.length === 1 ? " is" : "s are"} not tied to a 30-minute stay. ${loose.length === 1 ? "It remains" : "They remain"} in this gallery.</p>`
+    : "";
 }
 
 function renderLog(hourly) {
   if (hourly.length === 0) {
-    logEl.innerHTML = `<li class="empty">No hourly fixes yet.</li>`;
+    logEl.innerHTML = `<li class="empty">No hourly fixes yet. Start tracking and a fix is stored for each hour.</li>`;
     return;
   }
   logEl.innerHTML = hourly
     .slice(0, 48)
     .map(
-      (p) => `<li>
-        <time datetime="${new Date(p.t).toISOString()}">${formatWhen(p.t)}</time>
-        <span>${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</span>
-        <span class="muted">±${p.accuracy ?? "?"} m</span>
+      (point) => `<li>
+        <time datetime="${new Date(point.t).toISOString()}">${formatWhen(point.t)}</time>
+        <span>${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</span>
+        <span class="muted">±${point.accuracy ?? "?"} m</span>
       </li>`,
     )
     .join("");
 }
 
 function focusMap(lat, lng) {
-  if (!map || !Number.isFinite(lat)) return;
+  if (!map || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    setStatus("That photo has no location to show.", "bad");
+    return;
+  }
   follow = false;
   followBtn.setAttribute("aria-pressed", "false");
   map.setView([lat, lng], Math.max(map.getZoom(), 16));
@@ -382,7 +510,8 @@ function focusMap(lat, lng) {
 function renderMap(stays, trail) {
   if (typeof L === "undefined") throw new Error("Map library failed to load.");
   if (!map) {
-    map = L.map("map", { zoomControl: true, scrollWheelZoom: true });
+    map = L.map("map", { zoomControl: false, scrollWheelZoom: true });
+    L.control.zoom({ position: "topleft" }).addTo(map);
     const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap",
       maxZoom: 19,
@@ -405,7 +534,7 @@ function renderMap(stays, trail) {
   }
   pathLayer.clearLayers();
   stayLayer.clearLayers();
-  const line = trail.map((p) => [p.lat, p.lng]);
+  const line = trail.map((point) => [point.lat, point.lng]);
   if (line.length > 1) {
     L.polyline(line, { color: "#24392c", weight: 4, opacity: 0.85 }).addTo(pathLayer);
   }
@@ -423,22 +552,27 @@ function renderMap(stays, trail) {
       .addTo(pathLayer);
   });
   for (const stay of stays) {
-    const name = nameCache[stay.id] || "Stay";
-    L.circle([stay.lat, stay.lng], {
-      radius: 160,
-      color: "#b5522a",
-      weight: 2,
-      fillColor: "#b5522a",
-      fillOpacity: 0.16,
-    })
-      .bindPopup(`<strong>${escapeHtml(name)}</strong><br>${formatDuration(stay.duration)}<br>${formatWhen(stay.start)}`)
-      .addTo(stayLayer);
+    const name = placeName(stay);
+    const marker = settings.showStayRings
+      ? L.circle([stay.lat, stay.lng], {
+          radius: 160,
+          color: "#b5522a",
+          weight: 2,
+          fillColor: "#b5522a",
+          fillOpacity: 0.16,
+        })
+      : L.circleMarker([stay.lat, stay.lng], {
+          radius: 8,
+          color: "#b5522a",
+          weight: 2,
+          fillColor: "#efe6d6",
+          fillOpacity: 1,
+        });
+    marker.bindPopup(`<strong>${escapeHtml(name)}</strong><br>${formatDuration(stay.duration)}<br>${formatWhen(stay.start)}`).addTo(stayLayer);
   }
   const latest = trail[trail.length - 1];
   if (follow && latest) map.panTo([latest.lat, latest.lng]);
-  else if (!mapReady && line.length) {
-    map.fitBounds(line, { padding: [28, 28], maxZoom: 15 });
-  }
+  else if (!mapReady && line.length) map.fitBounds(line, { padding: [28, 28], maxZoom: 15 });
   mapReady = true;
 }
 
@@ -451,16 +585,22 @@ function latestSpeed(trail) {
   return (haversineMeters(a, b) / seconds) * 3.6;
 }
 
+function formatSpeed(kmh) {
+  if (kmh == null) return "—";
+  if (settings.units === "mi") return `${(kmh * 0.621371).toFixed(1)} mph`;
+  return `${kmh.toFixed(1)} km/h`;
+}
+
 function render() {
   releaseUrls();
-  const hourly = points.filter((p) => p.kind === "hourly").sort((a, b) => b.t - a.t);
+  const hourly = points.filter((point) => point.kind === "hourly").sort((a, b) => b.t - a.t);
   const trail = trailPoints();
   const stays = detectStays(points);
-  const { placed, loose } = matchPhotos(stays, photos);
+  const { placed } = matchPhotos(stays, photos);
   renderRoute(trail);
   renderLog(hourly);
   renderStays(stays, placed);
-  renderLoose(loose, photos);
+  renderPhotos();
   try {
     renderMap(stays, trail);
   } catch (error) {
@@ -469,9 +609,10 @@ function render() {
   document.querySelector("#stay-count").textContent = String(stays.length);
   document.querySelector("#fix-count").textContent = String(trail.length);
   document.querySelector("#photo-count").textContent = String(photos.length);
-  document.querySelector("#distance-count").textContent = formatDistance(pathLengthMeters(trail));
-  const speed = latestSpeed(trail);
-  document.querySelector("#speed-count").textContent = speed == null ? "—" : `${speed.toFixed(1)} km/h`;
+  document.querySelector("#distance-count").textContent = formatDistanceUnits(pathLengthMeters(trail), settings.units);
+  document.querySelector("#elapsed-count").textContent = trail.length < 2 ? "—" : formatDuration(trail[trail.length - 1].t - trail[0].t);
+  document.querySelector("#speed-count").textContent = formatSpeed(latestSpeed(trail));
+  if (viewerIndex >= 0 && !viewer.hidden) paintViewer();
   void labelStays(stays);
 }
 
@@ -480,7 +621,7 @@ async function labelStays(stays) {
   const token = ++labelToken;
   let changed = false;
   for (const stay of stays) {
-    if (nameCache[stay.id]) continue;
+    if (nameCache[stay.id] || annotations[stay.id]?.title) continue;
     const cached = await getMeta(`name:${stay.id}`);
     if (token !== labelToken) return;
     if (cached) {
@@ -508,47 +649,82 @@ async function labelStays(stays) {
   if (changed && token === labelToken) render();
 }
 
+async function prepareImage(file) {
+  if (!file || file.size < 4 * 1024 * 1024 || file.type === "image/gif") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSide = 2000;
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+  } catch {
+    return file;
+  }
+}
+
 async function importPhotos(fileList) {
-  const files = [...fileList].filter((file) => file.type.startsWith("image/") || /\.(jpe?g|png|heic|webp|gif)$/i.test(file.name));
-  if (files.length === 0) {
+  const plan = planPhotoImport(new Set(photos.map((photo) => photo.id)), [...fileList]);
+  if (plan.status === "cancel") {
+    setStatus("No photos were chosen.", "idle");
+    return;
+  }
+  if (plan.status === "empty") {
     setStatus("No images were in that selection.", "bad");
     return;
   }
-  setStatus(`Reading ${files.length} photo${files.length === 1 ? "" : "s"}…`, "busy");
+  const files = [...fileList];
+  setStatus(`Reading ${plan.ids.length} photo${plan.ids.length === 1 ? "" : "s"}…`, "busy");
   let added = 0;
+  let failed = 0;
   for (const file of files) {
     const id = `${file.name}:${file.size}:${file.lastModified}`;
-    if (photos.some((photo) => photo.id === id)) continue;
-    let t = file.lastModified;
-    let lat = null;
-    let lng = null;
-    if (/jpe?g$/i.test(file.name) || file.type === "image/jpeg") {
-      try {
-        const exif = parseJpegExif(await file.slice(0, Math.min(file.size, 512 * 1024)).arrayBuffer());
-        if (exif.t) t = exif.t;
-        if (exif.lat != null) {
-          lat = exif.lat;
-          lng = exif.lng;
+    if (!plan.ids.includes(id)) continue;
+    try {
+      let t = file.lastModified;
+      let lat = null;
+      let lng = null;
+      if (/jpe?g$/i.test(file.name) || file.type === "image/jpeg") {
+        try {
+          const exif = parseJpegExif(await file.slice(0, Math.min(file.size, 512 * 1024)).arrayBuffer());
+          if (exif.t) t = exif.t;
+          if (exif.lat != null) {
+            lat = exif.lat;
+            lng = exif.lng;
+          }
+        } catch {
+          /* Keep the file time when EXIF cannot be read. */
         }
-      } catch {
-        /* Keep the file time when EXIF cannot be read. */
       }
+      const stored = await prepareImage(file);
+      const here = latestPoint();
+      const photo = {
+        id,
+        name: file.name,
+        t,
+        lat: lat ?? here?.lat ?? null,
+        lng: lng ?? here?.lng ?? null,
+        type: stored.type || file.type || "image/jpeg",
+        blob: stored,
+        caption: "",
+        label: "",
+        favorite: false,
+      };
+      await putPhoto(photo);
+      photos.push(photo);
+      added += 1;
+    } catch {
+      failed += 1;
     }
-    const here = latestPoint();
-    const photo = {
-      id,
-      name: file.name,
-      t,
-      lat: lat ?? here?.lat ?? null,
-      lng: lng ?? here?.lng ?? null,
-      type: file.type || "image/jpeg",
-      blob: file,
-    };
-    await putPhoto(photo);
-    photos.push(photo);
-    added += 1;
   }
-  setStatus(added === 0 ? "Those photos were already saved." : `Saved ${added} photo${added === 1 ? "" : "s"}.`, "ok");
+  if (failed && added === 0) setStatus("Those photos could not be read.", "bad");
+  else if (added === 0) setStatus("Those photos were already saved.", "ok");
+  else setStatus(`Saved ${added} photo ${added === 1 ? "copy" : "copies"}${plan.duplicate ? `, ${plan.duplicate} already saved` : ""}. Your gallery is unchanged.`, "ok");
   render();
 }
 
@@ -568,7 +744,7 @@ function paintCard(title, subtitle, hue) {
 }
 
 async function loadMock() {
-  const real = points.filter((p) => !String(p.id).startsWith("mock:"));
+  const real = points.filter((point) => !String(point.id).startsWith("mock:"));
   const anchor = real[real.length - 1] || latestPoint();
   const { points: mockPoints, visits } = buildMockTrip(anchor);
   setStatus("Drawing a sample day on the map…", "busy");
@@ -588,6 +764,10 @@ async function loadMock() {
       lng: visit.lng,
       type: "image/jpeg",
       blob,
+      caption: visit.name,
+      label: "sample",
+      favorite: false,
+      place: visit.name,
     };
     await putPhoto(photo);
     if (!photos.some((have) => have.id === photo.id)) photos.push(photo);
@@ -604,12 +784,12 @@ async function loadMock() {
 }
 
 async function clearMock() {
-  const mockPoints = points.filter((p) => String(p.id).startsWith("mock:"));
-  const mockPhotos = photos.filter((p) => String(p.id).startsWith("mock-photo:"));
+  const mockPoints = points.filter((point) => String(point.id).startsWith("mock:"));
+  const mockPhotos = photos.filter((photo) => String(photo.id).startsWith("mock-photo:"));
   for (const point of mockPoints) await deletePoint(point.id);
   for (const photo of mockPhotos) await deletePhoto(photo.id);
-  points = points.filter((p) => !String(p.id).startsWith("mock:"));
-  photos = photos.filter((p) => !String(p.id).startsWith("mock-photo:"));
+  points = points.filter((point) => !String(point.id).startsWith("mock:"));
+  photos = photos.filter((photo) => !String(photo.id).startsWith("mock-photo:"));
   mapReady = false;
   setStatus("Sample day removed.", "ok");
   render();
@@ -630,6 +810,7 @@ async function ensureCameraPermission() {
 
 async function openCamera() {
   await ensureCameraPermission();
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("This device has no camera preview.");
   if (!cameraStream) {
     cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -643,6 +824,13 @@ async function openCamera() {
 
 function closeCamera() {
   cameraSheet.hidden = true;
+  if (nativeJournal()?.setTorch) {
+    try {
+      nativeJournal().setTorch(false);
+    } catch {
+      /* The activity also turns the light off when it pauses. */
+    }
+  }
   if (photoTimer) return;
   cameraStream?.getTracks().forEach((track) => track.stop());
   cameraStream = null;
@@ -653,6 +841,7 @@ async function capturePhoto(source) {
   if (!cameraStream) await openCamera();
   const width = cameraPreview.videoWidth || 1280;
   const height = cameraPreview.videoHeight || 720;
+  if (!width || !height) throw new Error("The camera preview is not ready.");
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -669,6 +858,10 @@ async function capturePhoto(source) {
     lng: here?.lng ?? null,
     type: "image/jpeg",
     blob,
+    caption: "",
+    label: "",
+    favorite: false,
+    place: here ? `${here.lat.toFixed(4)}, ${here.lng.toFixed(4)}` : "",
   };
   await putPhoto(photo);
   photos.push(photo);
@@ -676,21 +869,45 @@ async function capturePhoto(source) {
   render();
 }
 
-function setAutoPhoto(on) {
+function paintAuto(on) {
+  const button = document.querySelector("#auto-photo");
+  button.setAttribute("aria-pressed", String(on));
+  button.textContent = on ? "Auto photo on" : "Auto photo off";
+  document.querySelector("#set-auto").checked = on;
+}
+
+async function setAutoPhoto(on) {
   clearInterval(photoTimer);
   photoTimer = 0;
-  document.querySelector("#auto-photo").setAttribute("aria-pressed", String(on));
-  document.querySelector("#auto-photo").textContent = on ? "Stop auto photo" : "Auto photo 20s";
+  settings = { ...settings, autoPhoto: on };
+  await setMeta("settings", settings);
+  paintAuto(on);
   if (!on) {
     closeCamera();
     setStatus("Auto photo is off.", "idle");
     return;
   }
-  const shoot = () => {
-    capturePhoto("auto").catch((error) => setStatus(error?.message || "Camera permission is required.", "bad"));
-  };
-  shoot();
-  photoTimer = setInterval(shoot, SAMPLE_MS);
+  try {
+    await capturePhoto("auto");
+  } catch (error) {
+    settings = { ...settings, autoPhoto: false };
+    await setMeta("settings", settings);
+    paintAuto(false);
+    closeCamera();
+    setStatus(error?.message || "Camera permission is required. Auto photo stayed off.", "bad");
+    return;
+  }
+  photoTimer = setInterval(() => {
+    capturePhoto("auto").catch((error) => {
+      clearInterval(photoTimer);
+      photoTimer = 0;
+      settings = { ...settings, autoPhoto: false };
+      paintAuto(false);
+      void setMeta("settings", settings);
+      closeCamera();
+      setStatus(error?.message || "Auto photo stopped because the camera is unavailable.", "bad");
+    });
+  }, SAMPLE_MS);
 }
 
 function replayRoute() {
@@ -726,45 +943,301 @@ function replayRoute() {
   }, 350);
 }
 
-async function exportLog() {
+function download(name, contents, type) {
+  const blob = contents instanceof Blob ? contents : new Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportLog() {
   const payload = {
     exportedAt: new Date().toISOString(),
     points: points.map(({ id, t, lat, lng, accuracy, kind, hour }) => ({ id, t, lat, lng, accuracy, kind, hour })),
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "location-journal.json";
-  link.click();
-  URL.revokeObjectURL(url);
+  download("location-journal.json", JSON.stringify(payload, null, 2), "application/json");
+  setStatus("Route JSON saved. It stays on this device until you move the file.", "ok");
+}
+
+function exportGpx() {
+  if (points.length === 0) {
+    setStatus("There is no route to export yet.", "bad");
+    return;
+  }
+  download("location-journal.gpx", buildGpx(points), "application/gpx+xml");
+  setStatus("GPX route saved.", "ok");
 }
 
 async function clearPhotos() {
   for (const photo of photos) await deletePhoto(photo.id);
   photos = [];
+  selectedIds = new Set();
+  closeViewer();
   setStatus("Saved photo copies were removed. Your gallery is unchanged.", "ok");
   render();
 }
 
-document.querySelector("#more-toggle").addEventListener("click", () => {
-  const panel = document.querySelector("#more-panel");
-  const open = panel.hidden;
-  panel.hidden = !open;
-  document.querySelector("#more-toggle").setAttribute("aria-expanded", String(open));
-});
+function applyTorch(state) {
+  const view = torchView(state);
+  for (const id of ["#torch-quick", "#torch-camera"]) {
+    const button = document.querySelector(id);
+    button.disabled = view.disabled;
+    button.setAttribute("aria-pressed", String(view.pressed));
+    button.textContent = view.text;
+  }
+  document.querySelector("#torch-detail").textContent = view.detail;
+}
 
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("is-on", item === tab));
-    for (const name of ["route", "stays", "photos", "log"]) {
-      document.querySelector(`#panel-${name}`).hidden = name !== tab.dataset.tab;
-    }
+function toggleTorch() {
+  const native = nativeJournal();
+  if (!native?.setTorch) {
+    applyTorch("unavailable");
+    return;
+  }
+  const turningOn = document.querySelector("#torch-quick").getAttribute("aria-pressed") !== "true";
+  let result = "unavailable";
+  try {
+    result = native.setTorch(turningOn);
+  } catch {
+    result = "denied";
+  }
+  applyTorch(result || "unavailable");
+}
+
+function initTorch() {
+  const native = nativeJournal();
+  if (!native?.torchState) {
+    applyTorch("unavailable");
+    return;
+  }
+  try {
+    applyTorch(native.torchState() || "unsupported");
+  } catch {
+    applyTorch("unavailable");
+  }
+}
+
+function openViewer(id) {
+  const index = visiblePhotos.findIndex((photo) => photo.id === id);
+  if (index < 0) return;
+  viewerIndex = index;
+  viewer.hidden = false;
+  paintViewer();
+  document.querySelector("#viewer-close").focus();
+}
+
+function closeViewer() {
+  viewer.hidden = true;
+  viewerIndex = -1;
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = "";
+}
+
+function paintViewer() {
+  const photo = visiblePhotos[viewerIndex];
+  if (!photo) {
+    closeViewer();
+    return;
+  }
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = photo.blob ? URL.createObjectURL(photo.blob) : "";
+  const image = document.querySelector("#viewer-img");
+  image.src = viewerUrl;
+  image.alt = photoLabel(photo);
+  document.querySelector("#viewer-title").textContent = photo.caption || photo.name || "Photo";
+  const when = photo.t ? formatWhen(photo.t) : "Time unknown";
+  const where = photo.place || (photo.lat != null ? `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` : "Place unknown");
+  document.querySelector("#viewer-meta").textContent = `${when}. ${where}. This is the copy saved in the journal.`;
+  document.querySelector("#viewer-caption").value = photo.caption || "";
+  document.querySelector("#viewer-label").value = photo.label || "";
+  const favorite = document.querySelector("#viewer-fav");
+  favorite.setAttribute("aria-pressed", photo.favorite ? "true" : "false");
+  favorite.textContent = photo.favorite ? "Favorited" : "Favorite";
+}
+
+async function saveViewerFields() {
+  const photo = visiblePhotos[viewerIndex];
+  if (!photo) return;
+  photo.caption = document.querySelector("#viewer-caption").value.trim();
+  photo.label = document.querySelector("#viewer-label").value.trim();
+  await putPhoto(photo);
+  document.querySelector("#viewer-title").textContent = photo.caption || photo.name || "Photo";
+  document.querySelector("#viewer-img").alt = photoLabel(photo);
+}
+
+function stepViewer(delta) {
+  if (visiblePhotos.length === 0) return;
+  void saveViewerFields();
+  viewerIndex = (viewerIndex + delta + visiblePhotos.length) % visiblePhotos.length;
+  paintViewer();
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = settings.theme;
+}
+
+function syncSettingsForm() {
+  document.querySelector("#set-follow").checked = settings.followOnStart;
+  document.querySelector("#set-units").value = settings.units;
+  document.querySelector("#set-rings").checked = settings.showStayRings;
+  document.querySelector("#set-theme").value = settings.theme;
+  paintAuto(settings.autoPhoto);
+}
+
+async function saveSettings(patch) {
+  settings = mergeSettings({ ...settings, ...patch });
+  await setMeta("settings", settings);
+  applyTheme();
+  syncSettingsForm();
+  render();
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const comma = text.indexOf(",");
+      resolve(comma >= 0 ? text.slice(comma + 1) : text);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
   });
+}
+
+async function exportBackup() {
+  setStatus("Preparing a backup on this device…", "busy");
+  const serialPhotos = [];
+  for (const photo of photos) {
+    if (!photo.blob) continue;
+    serialPhotos.push({
+      id: photo.id,
+      name: photo.name,
+      t: photo.t,
+      lat: photo.lat,
+      lng: photo.lng,
+      type: photo.type,
+      caption: photo.caption || "",
+      label: photo.label || "",
+      favorite: Boolean(photo.favorite),
+      place: photo.place || "",
+      data: await blobToBase64(photo.blob),
+    });
+  }
+  const payload = buildBackup({ settings, annotations, points, photos: serialPhotos });
+  download("location-journal-backup.json", JSON.stringify(payload), "application/json");
+  setStatus("Backup saved. It includes the route, notes, settings, and photo copies.", "ok");
+}
+
+function bytesFromBase64(data) {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function restoreBackup(payload) {
+  const nextPoints = payload.points.filter(
+    (point) => point && point.id && Number.isFinite(point.lat) && Number.isFinite(point.lng) && Number.isFinite(point.t),
+  );
+  const nextPhotos = [];
+  let skipped = 0;
+  for (const photo of payload.photos || []) {
+    if (!photo?.id || !photo.data) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const blob = new Blob([bytesFromBase64(photo.data)], { type: photo.type || "image/jpeg" });
+      nextPhotos.push({
+        id: photo.id,
+        name: photo.name || "photo",
+        t: photo.t,
+        lat: photo.lat ?? null,
+        lng: photo.lng ?? null,
+        type: photo.type || "image/jpeg",
+        caption: photo.caption || "",
+        label: photo.label || "",
+        favorite: Boolean(photo.favorite),
+        place: photo.place || "",
+        blob,
+      });
+    } catch {
+      skipped += 1;
+    }
+  }
+  for (const point of nextPoints) await putPoint(point);
+  for (const photo of nextPhotos) await putPhoto(photo);
+  for (const point of points) {
+    if (!nextPoints.some((item) => item.id === point.id)) await deletePoint(point.id);
+  }
+  for (const photo of photos) {
+    if (!nextPhotos.some((item) => item.id === photo.id)) await deletePhoto(photo.id);
+  }
+  points = nextPoints;
+  photos = nextPhotos;
+  settings = mergeSettings(payload.settings);
+  annotations = payload.annotations && typeof payload.annotations === "object" && !Array.isArray(payload.annotations) ? payload.annotations : {};
+  await setMeta("settings", settings);
+  await setMeta("annotations", annotations);
+  applyTheme();
+  syncSettingsForm();
+  selectedIds = new Set();
+  closeViewer();
+  mapReady = false;
+  setStatus(skipped ? `Backup restored. ${skipped} photo ${skipped === 1 ? "copy was" : "copies were"} skipped.` : "Backup restored on this device.", "ok");
+  render();
+}
+
+async function deleteJournal() {
+  if (tracking) await setTracking(false);
+  for (const point of points) await deletePoint(point.id);
+  for (const photo of photos) await deletePhoto(photo.id);
+  points = [];
+  photos = [];
+  annotations = {};
+  nameCache = {};
+  selectedIds = new Set();
+  await setMeta("annotations", {});
+  closeViewer();
+  mapReady = false;
+  setStatus("The journal on this device was deleted. Your gallery is unchanged.", "ok");
+  render();
+}
+
+function setMenu(open) {
+  morePanel.hidden = !open;
+  moreToggle.setAttribute("aria-expanded", String(open));
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((item) => {
+    const on = item.dataset.tab === name;
+    item.classList.toggle("is-on", on);
+    if (on) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  for (const panel of ["route", "stays", "photos", "log"]) {
+    document.querySelector(`#panel-${panel}`).hidden = panel !== name;
+  }
+}
+
+moreToggle.addEventListener("click", () => setMenu(morePanel.hidden));
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => showTab(tab.dataset.tab));
 });
 
-trackBtn.addEventListener("click", () => setTracking(!tracking));
-recordBtn.addEventListener("click", () => takeFix("now"));
+trackBtn.addEventListener("click", () => {
+  locationBlocked = false;
+  void setTracking(!tracking);
+});
+recordBtn.addEventListener("click", () => {
+  locationBlocked = false;
+  void takeFix("now");
+});
 followBtn.addEventListener("click", () => {
   follow = followBtn.getAttribute("aria-pressed") !== "true";
   followBtn.setAttribute("aria-pressed", String(follow));
@@ -774,6 +1247,7 @@ followBtn.addEventListener("click", () => {
   }
 });
 replayBtn.addEventListener("click", () => {
+  setMenu(false);
   if (replayTimer) {
     clearInterval(replayTimer);
     replayTimer = 0;
@@ -789,57 +1263,224 @@ document.querySelector("#shutter").addEventListener("click", () => {
   capturePhoto("camera").catch((error) => setStatus(error?.message || "The photo could not be saved.", "bad"));
 });
 document.querySelector("#close-camera").addEventListener("click", () => {
-  if (photoTimer) setAutoPhoto(false);
+  if (photoTimer) void setAutoPhoto(false);
   else closeCamera();
 });
 document.querySelector("#auto-photo").addEventListener("click", () => {
-  setAutoPhoto(document.querySelector("#auto-photo").getAttribute("aria-pressed") !== "true");
+  void setAutoPhoto(document.querySelector("#auto-photo").getAttribute("aria-pressed") !== "true");
 });
-document.querySelector("#load-mock").addEventListener("click", () => loadMock());
-document.querySelector("#clear-mock").addEventListener("click", () => clearMock());
+document.querySelector("#load-mock").addEventListener("click", () => {
+  setMenu(false);
+  void loadMock();
+});
+document.querySelector("#clear-mock").addEventListener("click", () => {
+  setMenu(false);
+  void clearMock();
+});
 for (const input of [photoInput, folderInput]) {
   input.addEventListener("change", () => {
-    if (input.files?.length) void importPhotos(input.files);
+    void importPhotos(input.files ? [...input.files] : []);
     input.value = "";
   });
+  input.addEventListener("cancel", () => setStatus("No photos were chosen.", "idle"));
 }
-exportBtn.addEventListener("click", () => exportLog());
+exportBtn.addEventListener("click", () => {
+  setMenu(false);
+  exportLog();
+});
+document.querySelector("#export-gpx").addEventListener("click", () => {
+  setMenu(false);
+  exportGpx();
+});
 clearPhotosBtn.addEventListener("click", () => {
-  if (photos.length === 0) return;
-  if (confirm("Remove saved photo copies from this app? Your gallery is not changed.")) void clearPhotos();
+  setMenu(false);
+  if (photos.length === 0) {
+    setStatus("There are no photo copies to remove.", "idle");
+    return;
+  }
+  if (confirm(photoCopyDeleteWarning(photos.length))) void clearPhotos();
+});
+document.querySelector("#torch-quick").addEventListener("click", toggleTorch);
+document.querySelector("#torch-camera").addEventListener("click", toggleTorch);
+searchInput.addEventListener("input", () => renderPhotos());
+document.querySelector("#photo-select-mode").addEventListener("click", () => {
+  selecting = !selecting;
+  const button = document.querySelector("#photo-select-mode");
+  button.setAttribute("aria-pressed", String(selecting));
+  button.textContent = selecting ? "Selecting" : "Select";
+  document.querySelector("#photo-delete-selected").hidden = !selecting;
+  document.querySelector("#photo-share-selected").hidden = !selecting;
+  if (!selecting) selectedIds = new Set();
+  renderPhotos();
+});
+document.querySelector("#photo-delete-selected").addEventListener("click", async () => {
+  const chosen = photos.filter((photo) => selectedIds.has(photo.id));
+  if (chosen.length === 0) {
+    setStatus("Select one or more photo copies first.", "idle");
+    return;
+  }
+  if (!confirm(photoCopyDeleteWarning(chosen.length))) return;
+  for (const photo of chosen) await deletePhoto(photo.id);
+  photos = photos.filter((photo) => !selectedIds.has(photo.id));
+  selectedIds = new Set();
+  closeViewer();
+  setStatus("Selected photo copies were removed. Your gallery is unchanged.", "ok");
+  render();
+});
+document.querySelector("#photo-share-selected").addEventListener("click", async () => {
+  const chosen = photos.filter((photo) => selectedIds.has(photo.id) && photo.blob);
+  if (chosen.length === 0) {
+    setStatus("Select one or more photo copies first.", "idle");
+    return;
+  }
+  const files = chosen.map((photo) => new File([photo.blob], photo.name || "photo.jpg", { type: photo.type || "image/jpeg" }));
+  if (navigator.canShare?.({ files })) {
+    try {
+      await navigator.share({ files, title: "Location journal photos" });
+      setStatus("Shared the copies saved in this app.", "ok");
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+  for (const file of files) download(file.name, file, file.type);
+  setStatus("Downloaded the copies saved in this app. Gallery originals were not changed.", "ok");
+});
+
+document.querySelector("#viewer-close").addEventListener("click", () => {
+  void saveViewerFields().finally(() => {
+    closeViewer();
+    renderPhotos();
+  });
+});
+document.querySelector("#viewer-prev").addEventListener("click", () => stepViewer(-1));
+document.querySelector("#viewer-next").addEventListener("click", () => stepViewer(1));
+document.querySelector("#viewer-caption").addEventListener("change", () => void saveViewerFields());
+document.querySelector("#viewer-label").addEventListener("change", () => void saveViewerFields());
+document.querySelector("#viewer-fav").addEventListener("click", async () => {
+  const photo = visiblePhotos[viewerIndex];
+  if (!photo) return;
+  photo.favorite = !photo.favorite;
+  await putPhoto(photo);
+  paintViewer();
+});
+document.querySelector("#viewer-map").addEventListener("click", async () => {
+  const photo = visiblePhotos[viewerIndex];
+  if (!photo) return;
+  await saveViewerFields();
+  closeViewer();
+  showTab("route");
+  focusMap(Number(photo.lat), Number(photo.lng));
+});
+
+document.querySelector("#settings-open").addEventListener("click", () => {
+  setMenu(false);
+  syncSettingsForm();
+  settingsScreen.hidden = false;
+  document.querySelector("#settings-close").focus();
+});
+document.querySelector("#settings-close").addEventListener("click", () => {
+  settingsScreen.hidden = true;
+  document.querySelector("#settings-open").focus();
+});
+document.querySelector("#set-follow").addEventListener("change", (event) => void saveSettings({ followOnStart: event.target.checked }));
+document.querySelector("#set-auto").addEventListener("change", (event) => void setAutoPhoto(event.target.checked));
+document.querySelector("#set-units").addEventListener("change", (event) => void saveSettings({ units: event.target.value }));
+document.querySelector("#set-rings").addEventListener("change", (event) => void saveSettings({ showStayRings: event.target.checked }));
+document.querySelector("#set-theme").addEventListener("change", (event) => void saveSettings({ theme: event.target.value }));
+document.querySelector("#backup-export").addEventListener("click", () => void exportBackup());
+document.querySelector("#backup-file").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) {
+    setStatus("No backup was chosen.", "idle");
+    return;
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch {
+    setStatus("That file is not a journal backup.", "bad");
+    return;
+  }
+  const checked = planRestore(payload, false);
+  if (checked.message) {
+    setStatus(checked.message, "bad");
+    return;
+  }
+  const confirmed = confirm("Replace the journal on this device with this backup? The current route, notes, and photo copies will be replaced. Your gallery is not changed.");
+  const decision = planRestore(payload, confirmed);
+  if (!decision.apply) return;
+  try {
+    await restoreBackup(payload);
+  } catch (error) {
+    setStatus(error?.message || "The backup could not be restored. Existing records were left in place where possible.", "bad");
+  }
+});
+document.querySelector("#backup-file").addEventListener("cancel", () => setStatus("No backup was chosen.", "idle"));
+document.querySelector("#delete-journal").addEventListener("click", () => {
+  if (!confirm("Delete the route, notes, and photo copies on this device? Your gallery photos stay where they are. This cannot be undone.")) return;
+  void deleteJournal();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!viewer.hidden) document.querySelector("#viewer-close").click();
+    else if (!settingsScreen.hidden) document.querySelector("#settings-close").click();
+    else if (!cameraSheet.hidden) document.querySelector("#close-camera").click();
+    else if (!morePanel.hidden) setMenu(false);
+    return;
+  }
+  if (viewer.hidden) return;
+  if (event.key === "ArrowLeft") stepViewer(-1);
+  if (event.key === "ArrowRight") stepViewer(1);
 });
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && tracking) {
     const key = hourKey(Date.now());
-    if (!points.some((p) => p.id === `hourly:${key}`)) void takeFix("this hour");
+    if (!points.some((point) => point.id === `hourly:${key}`)) void takeFix("this hour");
     else scheduleHourly();
   }
 });
 
 window.__onNativePoints = () => syncNativePoints();
+window.__onTorch = (state) => applyTorch(state);
 window.__nativeTrackingResult = (ok, message) => {
   if (!ok) {
     tracking = false;
+    clearInterval(sampleTimer);
+    clearTimeout(hourTimer);
     trackBtn.textContent = "Start tracking";
     trackBtn.setAttribute("aria-pressed", "false");
-    setStatus(message || "Location permission is required.", "bad");
+    follow = false;
+    followBtn.setAttribute("aria-pressed", "false");
+    nextEl.textContent = "Tracking is paused.";
+    void setMeta("tracking", false);
+    setStatus(message || "Location permission is required. Allow location, then start tracking again.", "bad");
   }
 };
 
 async function init() {
   points = await getAllPoints();
   photos = await getAllPhotos();
+  settings = mergeSettings(await getMeta("settings"));
+  const savedNotes = await getMeta("annotations");
+  annotations = savedNotes && typeof savedNotes === "object" ? savedNotes : {};
+  applyTheme();
+  syncSettingsForm();
+  initTorch();
   if (nativeJournal()) await syncNativePoints();
-  tracking = nativeJournal() ? nativeJournal().isTracking() : Boolean(await getMeta("tracking"));
+  tracking = nativeJournal() ? Boolean(nativeJournal().isTracking()) : Boolean(await getMeta("tracking"));
   trackBtn.textContent = tracking ? "Stop tracking" : "Start tracking";
   trackBtn.setAttribute("aria-pressed", String(tracking));
   render();
   if (tracking) await setTracking(true);
   else {
-    setStatus("Tracking is off. Load the sample day or start a real route.", "idle");
+    setStatus("Tracking is paused. Load the sample day or start a route.", "idle");
     nextEl.textContent = "While tracking is on, a position is saved every 20 seconds.";
   }
+  if (settings.autoPhoto && !photoTimer) await setAutoPhoto(true);
 }
 
 init().catch((error) => {

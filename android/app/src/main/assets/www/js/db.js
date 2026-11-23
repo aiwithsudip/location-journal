@@ -1,20 +1,27 @@
+import { upgradePlan } from "./settings.js";
+
 const DB_NAME = "location-journal";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      if (!db.objectStoreNames.contains("points")) {
+      const plan = upgradePlan(event.oldVersion);
+      if (plan.createPoints && !db.objectStoreNames.contains("points")) {
         const points = db.createObjectStore("points", { keyPath: "id" });
         points.createIndex("byTime", "t");
       }
-      if (!db.objectStoreNames.contains("photos")) {
+      if (plan.createPhotos && !db.objectStoreNames.contains("photos")) {
         db.createObjectStore("photos", { keyPath: "id" });
       }
-      if (!db.objectStoreNames.contains("meta")) {
+      if (plan.createMeta && !db.objectStoreNames.contains("meta")) {
         db.createObjectStore("meta", { keyPath: "key" });
+      }
+      if (plan.indexPhotosByTime && db.objectStoreNames.contains("photos")) {
+        const photos = request.transaction.objectStore("photos");
+        if (!photos.indexNames.contains("byTime")) photos.createIndex("byTime", "t");
       }
     };
     request.onsuccess = () => resolve(request.result);

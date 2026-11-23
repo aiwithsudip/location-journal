@@ -9,50 +9,44 @@
 </head>
 <body>
   <div id="map" role="region" aria-label="Map of the route and stays"></div>
-  <p id="map-error" class="map-error" hidden>Map tiles did not load. Check the network, then move the map to try again.</p>
+  <p id="map-error" class="map-error" role="status" hidden>Map tiles did not load. Check the network, then move the map to try again.</p>
 
-  <header class="float-top">
-    <div>
-      <p class="eyebrow">Journal</p>
-      <p id="status" data-kind="idle">Opening…</p>
+  <header class="appbar">
+    <div class="appbar-title">
+      <p class="eyebrow">Location journal</p>
+      <p id="status" role="status" data-kind="idle">Opening…</p>
     </div>
-    <p id="live-chip" class="chip" data-kind="idle">Idle</p>
+    <p id="live-chip" class="chip" data-kind="idle">Paused</p>
+    <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
+    <button id="more-toggle" type="button" aria-expanded="false" aria-controls="more-panel">More</button>
   </header>
+  <div id="more-panel" class="menu" hidden>
+    <button id="load-mock" type="button">Load sample day</button>
+    <button id="clear-mock" type="button">Remove sample</button>
+    <button id="replay" type="button">Replay route</button>
+    <button id="export-log" type="button">Export JSON</button>
+    <button id="export-gpx" type="button">Export GPX</button>
+    <button id="clear-photos" type="button">Remove photo copies</button>
+  </div>
 
-  <section class="sheet" aria-label="Trip details">
-    <div class="sheet-head">
-      <section class="stats" aria-label="Summary">
-        <div><strong id="distance-count">0 m</strong><span>distance</span></div>
-        <div><strong id="speed-count">—</strong><span>speed</span></div>
-        <div><strong id="fix-count">0</strong><span>points</span></div>
-        <div><strong id="stay-count">0</strong><span>stays</span></div>
-        <div><strong id="photo-count">0</strong><span>photos</span></div>
-      </section>
-      <div class="primary">
-        <button id="toggle-tracking" type="button" aria-pressed="false">Start tracking</button>
-        <button id="open-camera" class="ghost" type="button">Photo</button>
-        <button id="record-now" class="ghost" type="button">Fix</button>
-        <button id="more-toggle" class="ghost" type="button" aria-expanded="false">More</button>
-      </div>
-      <p id="next-hour"></p>
-      <div id="more-panel" class="more" hidden>
-        <button id="load-mock" type="button">Load sample day</button>
-        <button id="clear-mock" class="ghost" type="button">Remove sample</button>
-        <button id="follow-map" class="ghost" type="button" aria-pressed="false">Follow</button>
-        <button id="replay" class="ghost" type="button">Replay</button>
-        <button id="auto-photo" class="ghost" type="button" aria-pressed="false">Auto photo 20s</button>
-        <label class="file-btn ghost">Gallery<input id="photo-input" type="file" accept="image/*" multiple /></label>
-        <label class="file-btn ghost">Folder<input id="folder-input" type="file" accept="image/*" webkitdirectory directory multiple /></label>
-        <button id="export-log" class="ghost" type="button">Export</button>
-        <button id="clear-photos" class="ghost" type="button">Remove photos</button>
-      </div>
+  <section class="sheet" aria-label="Trip">
+    <section class="stats" aria-label="Summary">
+      <div><strong id="distance-count">0 m</strong><span>distance</span></div>
+      <div><strong id="elapsed-count">—</strong><span>span</span></div>
+      <div><strong id="speed-count">—</strong><span>speed</span></div>
+      <div><strong id="fix-count">0</strong><span>points</span></div>
+      <div><strong id="stay-count">0</strong><span>stays</span></div>
+      <div><strong id="photo-count">0</strong><span>photos</span></div>
+    </section>
+    <div class="primary">
+      <button id="toggle-tracking" type="button" aria-pressed="false">Start tracking</button>
+      <button id="open-camera" type="button">Add photo</button>
+      <button id="record-now" type="button">Save fix</button>
+      <button id="follow-map" type="button" aria-pressed="false">Follow</button>
+      <button id="torch-quick" type="button" aria-pressed="false">Flashlight</button>
     </div>
-    <div class="tabs" role="tablist">
-      <button type="button" class="tab is-on" data-tab="route">Route</button>
-      <button type="button" class="tab" data-tab="stays">Stays</button>
-      <button type="button" class="tab" data-tab="photos">Photos</button>
-      <button type="button" class="tab" data-tab="log">Hourly</button>
-    </div>
+    <p id="next-hour"></p>
+    <p id="torch-detail" class="hint" role="status"></p>
     <div class="sheet-body">
       <div id="panel-route" class="tab-panel"></div>
       <div id="panel-stays" class="tab-panel" hidden>
@@ -60,6 +54,18 @@
         <div id="stays"></div>
       </div>
       <div id="panel-photos" class="tab-panel" hidden>
+        <div class="photo-tools">
+          <label class="search">Search photos
+            <input id="photo-search" type="search" placeholder="Date, caption, or label" />
+          </label>
+          <button id="photo-select-mode" type="button" aria-pressed="false">Select</button>
+          <button id="photo-delete-selected" type="button" hidden>Delete copies</button>
+          <button id="photo-share-selected" type="button" hidden>Share</button>
+          <label class="file-btn">Choose photos<input id="photo-input" type="file" accept="image/*" multiple /></label>
+          <label class="file-btn">Folder<input id="folder-input" type="file" accept="image/*" webkitdirectory directory multiple /></label>
+          <button id="auto-photo" type="button" aria-pressed="false">Auto photo off</button>
+        </div>
+        <div id="photo-grid" class="photo-grid"></div>
         <div id="loose"></div>
       </div>
       <div id="panel-log" class="tab-panel" hidden>
@@ -68,11 +74,93 @@
     </div>
   </section>
 
+  <nav class="bottom-nav" aria-label="Sections">
+    <button type="button" class="tab is-on" data-tab="route" aria-current="page">Route</button>
+    <button type="button" class="tab" data-tab="stays">Stays</button>
+    <button type="button" class="tab" data-tab="photos">Photos</button>
+    <button type="button" class="tab" data-tab="log">Hourly</button>
+  </nav>
+
   <div id="camera-sheet" class="camera-sheet" hidden>
-    <video id="camera-preview" playsinline autoplay muted></video>
+    <video id="camera-preview" playsinline autoplay muted aria-label="Camera preview"></video>
     <div class="camera-actions">
       <button id="shutter" type="button">Capture</button>
-      <button id="close-camera" class="ghost" type="button">Close</button>
+      <button id="torch-camera" type="button" aria-pressed="false">Flashlight</button>
+      <button id="close-camera" type="button">Close</button>
+    </div>
+  </div>
+
+  <div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-labelledby="viewer-title" hidden>
+    <div class="viewer-card">
+      <h2 id="viewer-title">Photo</h2>
+      <img id="viewer-img" alt="" />
+      <p id="viewer-meta"></p>
+      <label>Description
+        <input id="viewer-caption" type="text" maxlength="140" />
+      </label>
+      <label>Label
+        <input id="viewer-label" type="text" maxlength="40" />
+      </label>
+      <div class="viewer-actions">
+        <button id="viewer-prev" type="button">Previous</button>
+        <button id="viewer-next" type="button">Next</button>
+        <button id="viewer-fav" type="button" aria-pressed="false">Favorite</button>
+        <button id="viewer-map" type="button">Show on map</button>
+        <button id="viewer-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-screen" class="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
+    <div class="settings-card">
+      <header class="settings-bar">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" type="button">Close</button>
+      </header>
+      <section>
+        <h3>Tracking</h3>
+        <label class="check"><input id="set-follow" type="checkbox" /> Follow the map when tracking starts</label>
+        <p class="hint">A position is saved about every 20 seconds, plus one hourly fix, while tracking is on. Location permission is requested only when you start tracking.</p>
+      </section>
+      <section>
+        <h3>Photos</h3>
+        <label class="check"><input id="set-auto" type="checkbox" /> Take a photo every 20 seconds while this screen is open</label>
+        <p class="hint">Choose photos uses the system photo picker. Copies saved here are separate from your gallery.</p>
+      </section>
+      <section>
+        <h3>Map</h3>
+        <label>Distance
+          <select id="set-units">
+            <option value="km">Kilometers</option>
+            <option value="mi">Miles</option>
+          </select>
+        </label>
+        <label class="check"><input id="set-rings" type="checkbox" checked /> Show stay rings</label>
+      </section>
+      <section>
+        <h3>Display</h3>
+        <label>Appearance
+          <select id="set-theme">
+            <option value="system">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <p class="hint">Text follows your system font size. Tracking, selection, and the flashlight use words as well as color.</p>
+      </section>
+      <section>
+        <h3>Privacy and storage</h3>
+        <p class="hint">The route, notes, and photo copies stay on this device. Nothing is uploaded.</p>
+        <div class="settings-actions">
+          <button id="backup-export" type="button">Save backup</button>
+          <label class="file-btn">Restore backup<input id="backup-file" type="file" accept="application/json,.json" /></label>
+          <button id="delete-journal" type="button">Delete journal</button>
+        </div>
+      </section>
+      <section>
+        <h3>About</h3>
+        <p class="hint">Location journal 1.3.0. Route, stays of 30 minutes, hourly fixes, and photos on a map.</p>
+      </section>
     </div>
   </div>
 
