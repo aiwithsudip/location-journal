@@ -33,4 +33,9 @@ public final class JournalBridge {
     public String pullFixes() {
         return new PointStore(activity).allJson();
     }
+
+    @JavascriptInterface
+    public void ensureCamera() {
+        activity.runOnUiThread(activity::askCamera);
+    }
 }

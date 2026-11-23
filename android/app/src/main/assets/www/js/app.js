@@ -1,48 +1,80 @@
 import {
   detectStays,
   formatClock,
+  formatDistance,
   formatDuration,
   formatWhen,
+  haversineMeters,
   hourKey,
   matchPhotos,
+  pathLengthMeters,
 } from "./geo.js";
-import { deletePhoto, getAllPhotos, getAllPoints, getMeta, putPhoto, putPoint, setMeta } from "./db.js";
+import { deletePhoto, deletePoint, getAllPhotos, getAllPoints, getMeta, putPhoto, putPoint, setMeta } from "./db.js";
 import { parseJpegExif } from "./exif.js";
+import { buildMockTrip } from "./mock.js";
 
-const SAMPLE_MS = 5 * 60 * 1000;
-const GEO_OPTIONS = { enableHighAccuracy: true, maximumAge: 60 * 1000, timeout: 25 * 1000 };
+const SAMPLE_MS = 20 * 1000;
+const GEO_OPTIONS = { enableHighAccuracy: true, maximumAge: 15 * 1000, timeout: 20 * 1000 };
 
 const statusEl = document.querySelector("#status");
 const nextEl = document.querySelector("#next-hour");
+const chipEl = document.querySelector("#live-chip");
 const logEl = document.querySelector("#hourly-log");
 const staysEl = document.querySelector("#stays");
 const looseEl = document.querySelector("#loose");
+const routeEl = document.querySelector("#panel-route");
 const trackBtn = document.querySelector("#toggle-tracking");
 const recordBtn = document.querySelector("#record-now");
 const photoInput = document.querySelector("#photo-input");
 const folderInput = document.querySelector("#folder-input");
 const exportBtn = document.querySelector("#export-log");
 const clearPhotosBtn = document.querySelector("#clear-photos");
+const followBtn = document.querySelector("#follow-map");
+const replayBtn = document.querySelector("#replay");
+const cameraSheet = document.querySelector("#camera-sheet");
+const cameraPreview = document.querySelector("#camera-preview");
 
 let map;
 let stayLayer;
 let pathLayer;
+let replayMarker;
 let tracking = false;
+let follow = false;
 let sampleTimer = 0;
 let hourTimer = 0;
+let photoTimer = 0;
+let replayTimer = 0;
 let points = [];
 let photos = [];
 let objectUrls = [];
 let nameCache = {};
+let cameraStream = null;
+let mapReady = false;
 
 function setStatus(text, kind) {
   statusEl.textContent = text;
   statusEl.dataset.kind = kind ?? "idle";
+  chipEl.textContent = tracking ? "Tracking" : kind === "busy" ? "Working" : "Idle";
+  chipEl.dataset.kind = tracking ? "ok" : kind ?? "idle";
 }
 
 function releaseUrls() {
   for (const url of objectUrls) URL.revokeObjectURL(url);
   objectUrls = [];
+}
+
+function nativeJournal() {
+  return window.AndroidJournal || null;
+}
+
+function trailPoints() {
+  const samples = points.filter((p) => p.kind === "sample");
+  return (samples.length ? samples : points).slice().sort((a, b) => a.t - b.t);
+}
+
+function latestPoint() {
+  const trail = trailPoints();
+  return trail[trail.length - 1] ?? null;
 }
 
 function currentPosition() {
@@ -67,7 +99,6 @@ async function saveFix(position, { hourly }) {
     kind: "sample",
   };
   await putPoint(sample);
-
   const key = hourKey(t);
   const hourlyId = `hourly:${key}`;
   const existing = points.find((p) => p.id === hourlyId);
@@ -84,17 +115,12 @@ async function saveFix(position, { hourly }) {
     };
     await putPoint(hourlyPoint);
   }
-
   const byId = new Map(points.map((p) => [p.id, p]));
   byId.set(sample.id, sample);
   if (hourlyPoint) byId.set(hourlyPoint.id, hourlyPoint);
   points = [...byId.values()];
   render();
   return hourlyPoint ?? sample;
-}
-
-function nativeJournal() {
-  return window.AndroidJournal || null;
 }
 
 function syncNativePoints() {
@@ -132,23 +158,21 @@ async function takeFix(reason) {
         resolve();
       };
     });
-    const key = hourKey(Date.now());
-    const saved = points.find((p) => p.id === `hourly:${key}`) || points[points.length - 1];
+    const saved = latestPoint();
     if (saved) setStatus(`Position saved. ${formatWhen(saved.t)}.`, "ok");
     else setStatus("Still waiting for a GPS fix. Keep location on.", "busy");
-    if (tracking) nextEl.textContent = "The phone saves the next hour while tracking stays on.";
+    if (tracking) nextEl.textContent = "A fix is saved about every 20 seconds, plus one each hour.";
     return;
   }
-  setStatus(`Finding your location (${reason})…`, "busy");
+  setStatus("Finding your location…", "busy");
   try {
     const position = await currentPosition();
     const saved = await saveFix(position, { hourly: reason === "this hour" || reason === "now" });
-    const hourlyNote = saved.kind === "hourly" ? "Hourly fix saved." : "Position saved.";
-    setStatus(`${hourlyNote} ${formatWhen(saved.t)}.`, "ok");
-    scheduleHourly();
+    setStatus(`Position saved. ${formatWhen(saved.t)}.`, "ok");
+    if (saved.kind !== "hourly") scheduleHourly();
+    else scheduleHourly();
   } catch (error) {
-    const message = error && error.message ? error.message : "Location was denied or unavailable.";
-    setStatus(message, "bad");
+    setStatus(error?.message || "Location was denied or unavailable.", "bad");
   }
 }
 
@@ -162,12 +186,10 @@ function scheduleHourly() {
   const next = new Date(now);
   next.setMinutes(0, 0, 0);
   next.setHours(now.getHours() + 1);
-  const wait = Math.max(1000, next.getTime() - now.getTime());
-  nextEl.textContent = `Next hourly save at ${formatClock(next.getTime())}.`;
-  hourTimer = setTimeout(async () => {
-    if (!tracking) return;
-    await takeFix("this hour");
-  }, wait);
+  nextEl.textContent = `Next hourly save at ${formatClock(next.getTime())}. Track points every 20 seconds.`;
+  hourTimer = setTimeout(() => {
+    if (tracking) void takeFix("this hour");
+  }, Math.max(1000, next.getTime() - now.getTime()));
 }
 
 async function setTracking(on) {
@@ -179,15 +201,22 @@ async function setTracking(on) {
   clearTimeout(hourTimer);
   if (!on) {
     if (nativeJournal()) nativeJournal().setTracking(false);
-    nextEl.textContent = "Tracking is off. Saved places stay on this device.";
+    follow = false;
+    followBtn.setAttribute("aria-pressed", "false");
+    nextEl.textContent = "Tracking is off. The route stays on this device.";
     setStatus("Tracking is paused.", "idle");
     return;
   }
+  follow = true;
+  followBtn.setAttribute("aria-pressed", "true");
   if (nativeJournal()) {
     nativeJournal().setTracking(true);
     document.querySelector("#stay-hint").textContent =
-      "The phone records about every five minutes and keeps one fix each hour, including after you leave this screen. A notification stays up while tracking is on.";
+      "The phone stores a position every 20 seconds and one fix each hour, even after you leave this screen.";
     nextEl.textContent = "Waiting for the first fix…";
+    sampleTimer = setInterval(() => {
+      if (tracking) void syncNativePoints();
+    }, SAMPLE_MS);
     await takeFix("this hour");
     return;
   }
@@ -195,13 +224,140 @@ async function setTracking(on) {
   const haveHour = points.some((p) => p.id === `hourly:${key}`);
   await takeFix(haveHour ? "sample" : "this hour");
   sampleTimer = setInterval(() => {
-    if (tracking) takeFix("sample");
+    if (tracking) void takeFix("sample");
   }, SAMPLE_MS);
+}
+
+function escapeHtml(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll('"', "&quot;");
+}
+
+function slideshowHtml(items, label) {
+  if (items.length === 0) {
+    return `<p class="empty-photos">No photos for this stop yet. Use Take photo, auto photo, or the gallery.</p>`;
+  }
+  const slides = items
+    .map((photo, index) => {
+      const url = URL.createObjectURL(photo.blob);
+      objectUrls.push(url);
+      const when = photo.t ? formatWhen(photo.t) : photo.name;
+      return `<figure class="slide${index === 0 ? " is-active" : ""}">
+        <img src="${url}" alt="${escapeAttr(photo.name)}" />
+        <figcaption>${escapeHtml(when)}</figcaption>
+      </figure>`;
+    })
+    .join("");
+  return `<div class="slideshow" aria-label="${escapeAttr(label)}">
+    <div class="slides">${slides}</div>
+    <div class="slide-controls">
+      <button type="button" class="prev">Prev</button>
+      <span class="slide-count">1 / ${items.length}</span>
+      <button type="button" class="next">Next</button>
+    </div>
+  </div>`;
+}
+
+function wireSlideshows(root) {
+  for (const show of root.querySelectorAll(".slideshow")) {
+    const slides = [...show.querySelectorAll(".slide")];
+    const count = show.querySelector(".slide-count");
+    let index = 0;
+    const showIndex = (next) => {
+      if (slides.length === 0) return;
+      index = (next + slides.length) % slides.length;
+      slides.forEach((slide, i) => slide.classList.toggle("is-active", i === index));
+      if (count) count.textContent = `${index + 1} / ${slides.length}`;
+    };
+    show.querySelector(".prev")?.addEventListener("click", () => showIndex(index - 1));
+    show.querySelector(".next")?.addEventListener("click", () => showIndex(index + 1));
+    if (slides.length > 1) {
+      const timer = setInterval(() => {
+        if (!show.isConnected) {
+          clearInterval(timer);
+          return;
+        }
+        const box = show.getBoundingClientRect();
+        if (box.bottom < 0 || box.top > innerHeight) return;
+        showIndex(index + 1);
+      }, 3500);
+    }
+  }
+}
+
+function renderRoute(trail) {
+  const recent = trail.slice(-12).reverse();
+  if (recent.length === 0) {
+    routeEl.innerHTML = `<article class="empty-card"><h3>No route yet</h3><p>Start tracking to draw where you go, or load the sample day to see a full path, stays, and photos.</p></article>`;
+    return;
+  }
+  routeEl.innerHTML = recent
+    .map(
+      (point) => `<button type="button" class="route-item" data-lat="${point.lat}" data-lng="${point.lng}">
+        <span class="dot"></span>
+        <span><strong>${formatWhen(point.t)}</strong><br><span class="muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</span></span>
+        <span class="muted">±${point.accuracy ?? "?"} m</span>
+      </button>`,
+    )
+    .join("");
+  routeEl.querySelectorAll(".route-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      focusMap(Number(button.dataset.lat), Number(button.dataset.lng));
+    });
+  });
+}
+
+function renderStays(stays, placed) {
+  if (stays.length === 0) {
+    staysEl.innerHTML = `<article class="empty-card"><h3>No stays of 30 minutes yet</h3><p>Stand in one area while tracking is on. After half an hour the place appears here with its photos.</p></article>`;
+    return;
+  }
+  staysEl.innerHTML = stays
+    .slice()
+    .reverse()
+    .map((stay) => {
+      const photosHere = placed.get(stay.id) ?? [];
+      const name = nameCache[stay.id] || `${stay.lat.toFixed(4)}, ${stay.lng.toFixed(4)}`;
+      return `<article class="stay" id="${stay.id}">
+        <header>
+          <p class="kicker">${formatDuration(stay.duration)} · ${stay.samples} fixes</p>
+          <h3>${escapeHtml(name)}</h3>
+          <p class="when">${formatWhen(stay.start)} – ${formatClock(stay.end)}</p>
+          <button type="button" class="ghost jump" data-lat="${stay.lat}" data-lng="${stay.lng}">Show on map</button>
+        </header>
+        ${slideshowHtml(photosHere, `Photos from ${name}`)}
+      </article>`;
+    })
+    .join("");
+  staysEl.querySelectorAll(".jump").forEach((button) => {
+    button.addEventListener("click", () => focusMap(Number(button.dataset.lat), Number(button.dataset.lng)));
+  });
+  wireSlideshows(staysEl);
+}
+
+function renderLoose(loose, allPhotos) {
+  const album = allPhotos.slice().sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+  if (album.length === 0) {
+    looseEl.innerHTML = `<article class="empty-card"><h3>No photos yet</h3><p>Take one with the camera, turn on auto photo, or add pictures from the gallery.</p></article>`;
+    return;
+  }
+  looseEl.innerHTML = `<article class="stay">
+      <header><p class="kicker">${album.length} saved</p><h3>All photos</h3></header>
+      ${slideshowHtml(album, "All photos")}
+    </article>
+    ${
+      loose.length
+        ? `<article class="stay"><header><p class="kicker">${loose.length} unmatched</p><h3>Not tied to a stay</h3></header>${slideshowHtml(loose, "Unmatched photos")}</article>`
+        : ""
+    }`;
+  wireSlideshows(looseEl);
 }
 
 function renderLog(hourly) {
   if (hourly.length === 0) {
-    logEl.innerHTML = `<li class="empty">No hourly fixes yet. Start tracking and leave this tab open.</li>`;
+    logEl.innerHTML = `<li class="empty">No hourly fixes yet.</li>`;
     return;
   }
   logEl.innerHTML = hourly
@@ -216,178 +372,94 @@ function renderLog(hourly) {
     .join("");
 }
 
-function slideshowHtml(items, label) {
-  if (items.length === 0) {
-    return `<p class="empty-photos">No gallery photos match this stay. Photos need a capture time, or a location, that lines up with it.</p>`;
-  }
-  const slides = items
-    .map((photo, index) => {
-      const url = URL.createObjectURL(photo.blob);
-      objectUrls.push(url);
-      const when = photo.t ? formatWhen(photo.t) : photo.name;
-      return `<figure class="slide${index === 0 ? " is-active" : ""}" data-index="${index}">
-        <img src="${url}" alt="${escapeAttr(photo.name)}" />
-        <figcaption>${escapeHtml(when)}</figcaption>
-      </figure>`;
-    })
-    .join("");
-  return `<div class="slideshow" data-count="${items.length}" aria-label="${escapeAttr(label)}">
-    <div class="slides">${slides}</div>
-    <div class="slide-controls">
-      <button type="button" class="prev" aria-label="Previous photo">Prev</button>
-      <span class="slide-count">1 / ${items.length}</span>
-      <button type="button" class="next" aria-label="Next photo">Next</button>
-    </div>
-  </div>`;
+function focusMap(lat, lng) {
+  if (!map || !Number.isFinite(lat)) return;
+  follow = false;
+  followBtn.setAttribute("aria-pressed", "false");
+  map.setView([lat, lng], Math.max(map.getZoom(), 16));
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function escapeAttr(value) {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
-
-function renderStays(stays, placed) {
-  if (stays.length === 0) {
-    staysEl.innerHTML = `<article class="empty-card">
-      <h3>No stays of 30 minutes yet</h3>
-      <p>A stay appears when two or more fixes, inside about 200 meters, span at least 30 minutes. Leave this page open while you are somewhere.</p>
-    </article>`;
-    return;
-  }
-
-  staysEl.innerHTML = stays
-    .slice()
-    .reverse()
-    .map((stay) => {
-      const photosHere = placed.get(stay.id) ?? [];
-      const name = nameCache[stay.id] || `${stay.lat.toFixed(4)}, ${stay.lng.toFixed(4)}`;
-      return `<article class="stay" id="${stay.id}">
-        <header>
-          <p class="kicker">${formatDuration(stay.duration)} · ${stay.samples} fixes</p>
-          <h3>${escapeHtml(name)}</h3>
-          <p class="when">${formatWhen(stay.start)} – ${formatClock(stay.end)}</p>
-        </header>
-        ${slideshowHtml(photosHere, `Photos from ${name}`)}
-      </article>`;
-    })
-    .join("");
-  wireSlideshows(staysEl);
-}
-
-function renderLoose(loose) {
-  if (loose.length === 0) {
-    looseEl.hidden = true;
-    looseEl.innerHTML = "";
-    return;
-  }
-  looseEl.hidden = false;
-  looseEl.innerHTML = `<article class="stay">
-    <header>
-      <p class="kicker">${loose.length} photo${loose.length === 1 ? "" : "s"}</p>
-      <h3>Not tied to a stay</h3>
-      <p class="when">These did not fall inside a 30-minute place, by time or by map location.</p>
-    </header>
-    ${slideshowHtml(loose, "Photos not tied to a stay")}
-  </article>`;
-  wireSlideshows(looseEl);
-}
-
-function wireSlideshows(root) {
-  for (const show of root.querySelectorAll(".slideshow")) {
-    const slides = [...show.querySelectorAll(".slide")];
-    const count = show.querySelector(".slide-count");
-    let index = 0;
-    const showIndex = (next) => {
-      index = (next + slides.length) % slides.length;
-      slides.forEach((slide, i) => slide.classList.toggle("is-active", i === index));
-      if (count) count.textContent = `${index + 1} / ${slides.length}`;
-    };
-    show.querySelector(".prev")?.addEventListener("click", () => showIndex(index - 1));
-    show.querySelector(".next")?.addEventListener("click", () => showIndex(index + 1));
-    if (slides.length > 1) {
-      const timer = setInterval(() => {
-        if (!show.isConnected) {
-          clearInterval(timer);
-          return;
-        }
-        if (show.getBoundingClientRect().bottom < 0 || show.getBoundingClientRect().top > innerHeight) return;
-        showIndex(index + 1);
-      }, 3500);
-    }
-  }
-}
-
-function renderMap(stays, hourly) {
+function renderMap(stays, trail) {
   if (!map) {
     map = L.map("map", { zoomControl: true, scrollWheelZoom: true });
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
       subdomains: "abcd",
       maxZoom: 19,
     }).addTo(map);
     pathLayer = L.layerGroup().addTo(map);
     stayLayer = L.layerGroup().addTo(map);
-    map.setView([20, 0], 2);
+    map.on("dragstart", () => {
+      follow = false;
+      followBtn.setAttribute("aria-pressed", "false");
+    });
+    map.setView([27.66, 84.42], 12);
   }
   pathLayer.clearLayers();
   stayLayer.clearLayers();
-
-  const trail = hourly.map((p) => [p.lat, p.lng]);
-  if (trail.length > 1) {
-    L.polyline(trail, { color: "#8d5a3c", weight: 3, opacity: 0.75 }).addTo(pathLayer);
+  const line = trail.map((p) => [p.lat, p.lng]);
+  if (line.length > 1) {
+    L.polyline(line, { color: "#24392c", weight: 4, opacity: 0.85 }).addTo(pathLayer);
   }
-  for (const point of hourly) {
+  const step = Math.max(1, Math.ceil(trail.length / 80));
+  trail.forEach((point, index) => {
+    if (index % step !== 0 && index !== trail.length - 1) return;
     L.circleMarker([point.lat, point.lng], {
-      radius: 4,
-      color: "#3d4a3a",
-      weight: 1,
-      fillColor: "#efe6d6",
+      radius: index === trail.length - 1 ? 8 : 3,
+      color: index === trail.length - 1 ? "#b5522a" : "#3d4a3a",
+      weight: 2,
+      fillColor: index === trail.length - 1 ? "#b5522a" : "#efe6d6",
       fillOpacity: 1,
     })
       .bindTooltip(formatWhen(point.t))
       .addTo(pathLayer);
-  }
-
-  const bounds = [];
+  });
   for (const stay of stays) {
     const name = nameCache[stay.id] || "Stay";
     L.circle([stay.lat, stay.lng], {
-      radius: 180,
+      radius: 160,
       color: "#b5522a",
       weight: 2,
       fillColor: "#b5522a",
-      fillOpacity: 0.18,
-    }).addTo(stayLayer);
-    L.marker([stay.lat, stay.lng])
-      .bindPopup(
-        `<strong>${escapeHtml(name)}</strong><br>${formatDuration(stay.duration)}<br>${formatWhen(stay.start)}`,
-      )
+      fillOpacity: 0.16,
+    })
+      .bindPopup(`<strong>${escapeHtml(name)}</strong><br>${formatDuration(stay.duration)}<br>${formatWhen(stay.start)}`)
       .addTo(stayLayer);
-    bounds.push([stay.lat, stay.lng]);
   }
-  for (const point of hourly) bounds.push([point.lat, point.lng]);
-  if (bounds.length === 1) map.setView(bounds[0], 15);
-  else if (bounds.length > 1) map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15 });
+  const latest = trail[trail.length - 1];
+  if (follow && latest) map.panTo([latest.lat, latest.lng]);
+  else if (!mapReady && line.length) {
+    map.fitBounds(line, { padding: [28, 28], maxZoom: 15 });
+  }
+  mapReady = true;
+}
+
+function latestSpeed(trail) {
+  if (trail.length < 2) return null;
+  const a = trail[trail.length - 2];
+  const b = trail[trail.length - 1];
+  const seconds = (b.t - a.t) / 1000;
+  if (seconds <= 0 || seconds > 180) return null;
+  return (haversineMeters(a, b) / seconds) * 3.6;
 }
 
 function render() {
   releaseUrls();
   const hourly = points.filter((p) => p.kind === "hourly").sort((a, b) => b.t - a.t);
+  const trail = trailPoints();
   const stays = detectStays(points);
   const { placed, loose } = matchPhotos(stays, photos);
+  renderRoute(trail);
   renderLog(hourly);
   renderStays(stays, placed);
-  renderLoose(loose);
-  renderMap(stays, [...hourly].reverse());
+  renderLoose(loose, photos);
+  renderMap(stays, trail);
   document.querySelector("#stay-count").textContent = String(stays.length);
-  document.querySelector("#hour-count").textContent = String(hourly.length);
+  document.querySelector("#fix-count").textContent = String(trail.length);
   document.querySelector("#photo-count").textContent = String(photos.length);
+  document.querySelector("#distance-count").textContent = formatDistance(pathLengthMeters(trail));
+  const speed = latestSpeed(trail);
+  document.querySelector("#speed-count").textContent = speed == null ? "—" : `${speed.toFixed(1)} km/h`;
   void labelStays(stays);
 }
 
@@ -405,8 +477,10 @@ async function labelStays(stays) {
       continue;
     }
     try {
-      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${stay.lat}&lon=${stay.lng}&zoom=18`;
-      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${stay.lat}&lon=${stay.lng}&zoom=18`,
+        { headers: { Accept: "application/json" } },
+      );
       if (!response.ok) continue;
       const body = await response.json();
       const name = body.name || body.address?.suburb || body.address?.neighbourhood || body.display_name?.split(",")[0];
@@ -416,7 +490,7 @@ async function labelStays(stays) {
       changed = true;
       await new Promise((resolve) => setTimeout(resolve, 1100));
     } catch {
-      /* Place names are optional. Coordinates remain. */
+      /* Coordinates remain when a place name is unavailable. */
     }
   }
   if (changed && token === labelToken) render();
@@ -438,8 +512,7 @@ async function importPhotos(fileList) {
     let lng = null;
     if (/jpe?g$/i.test(file.name) || file.type === "image/jpeg") {
       try {
-        const buffer = await file.slice(0, Math.min(file.size, 512 * 1024)).arrayBuffer();
-        const exif = parseJpegExif(buffer);
+        const exif = parseJpegExif(await file.slice(0, Math.min(file.size, 512 * 1024)).arrayBuffer());
         if (exif.t) t = exif.t;
         if (exif.lat != null) {
           lat = exif.lat;
@@ -449,13 +522,196 @@ async function importPhotos(fileList) {
         /* Keep the file time when EXIF cannot be read. */
       }
     }
-    const photo = { id, name: file.name, t, lat, lng, type: file.type || "image/jpeg", blob: file };
+    const here = latestPoint();
+    const photo = {
+      id,
+      name: file.name,
+      t,
+      lat: lat ?? here?.lat ?? null,
+      lng: lng ?? here?.lng ?? null,
+      type: file.type || "image/jpeg",
+      blob: file,
+    };
     await putPhoto(photo);
     photos.push(photo);
     added += 1;
   }
   setStatus(added === 0 ? "Those photos were already saved." : `Saved ${added} photo${added === 1 ? "" : "s"}.`, "ok");
   render();
+}
+
+function paintCard(title, subtitle, hue) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 960;
+  canvas.height = 600;
+  const pen = canvas.getContext("2d");
+  pen.fillStyle = hue;
+  pen.fillRect(0, 0, 960, 600);
+  pen.fillStyle = "#f6efe4";
+  pen.font = "64px Georgia, serif";
+  pen.fillText(title, 48, 280);
+  pen.font = "28px Segoe UI, sans-serif";
+  pen.fillText(subtitle, 48, 340);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+}
+
+async function loadMock() {
+  const real = points.filter((p) => !String(p.id).startsWith("mock:"));
+  const anchor = real[real.length - 1] || latestPoint();
+  const { points: mockPoints, visits } = buildMockTrip(anchor);
+  setStatus("Drawing a sample day on the map…", "busy");
+  for (const point of mockPoints) {
+    if (points.some((have) => have.id === point.id)) continue;
+    await putPoint(point);
+    points.push(point);
+  }
+  const hues = ["#24392c", "#b5522a", "#3d4a3a", "#6e4b32"];
+  for (const [index, visit] of visits.entries()) {
+    const blob = await paintCard(visit.name, formatWhen(visit.start), hues[index % hues.length]);
+    const photo = {
+      id: `mock-photo:${visit.name}`,
+      name: `${visit.name}.jpg`,
+      t: visit.start + 10 * 60 * 1000,
+      lat: visit.lat,
+      lng: visit.lng,
+      type: "image/jpeg",
+      blob,
+    };
+    await putPhoto(photo);
+    if (!photos.some((have) => have.id === photo.id)) photos.push(photo);
+    const stays = detectStays(points);
+    const stay = stays.find((item) => Math.abs(item.lat - visit.lat) < 0.001 && Math.abs(item.lng - visit.lng) < 0.001);
+    if (stay) {
+      nameCache[stay.id] = visit.name;
+      await setMeta(`name:${stay.id}`, visit.name);
+    }
+  }
+  mapReady = false;
+  setStatus("Sample day loaded. It is practice data, not your real route.", "ok");
+  render();
+}
+
+async function clearMock() {
+  const mockPoints = points.filter((p) => String(p.id).startsWith("mock:"));
+  const mockPhotos = photos.filter((p) => String(p.id).startsWith("mock-photo:"));
+  for (const point of mockPoints) await deletePoint(point.id);
+  for (const photo of mockPhotos) await deletePhoto(photo.id);
+  points = points.filter((p) => !String(p.id).startsWith("mock:"));
+  photos = photos.filter((p) => !String(p.id).startsWith("mock-photo:"));
+  mapReady = false;
+  setStatus("Sample day removed.", "ok");
+  render();
+}
+
+async function ensureCameraPermission() {
+  const native = nativeJournal();
+  if (!native?.ensureCamera) return;
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 20000);
+    window.__onCamera = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    native.ensureCamera();
+  });
+}
+
+async function openCamera() {
+  await ensureCameraPermission();
+  if (!cameraStream) {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: "environment" } },
+    });
+    cameraPreview.srcObject = cameraStream;
+    await cameraPreview.play();
+  }
+  cameraSheet.hidden = false;
+}
+
+function closeCamera() {
+  cameraSheet.hidden = true;
+  if (photoTimer) return;
+  cameraStream?.getTracks().forEach((track) => track.stop());
+  cameraStream = null;
+  cameraPreview.srcObject = null;
+}
+
+async function capturePhoto(source) {
+  if (!cameraStream) await openCamera();
+  const width = cameraPreview.videoWidth || 1280;
+  const height = cameraPreview.videoHeight || 720;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(cameraPreview, 0, 0, width, height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+  if (!blob) throw new Error("The camera did not return a photo.");
+  const here = latestPoint();
+  const t = Date.now();
+  const photo = {
+    id: `shot:${t}`,
+    name: `${source}-${t}.jpg`,
+    t,
+    lat: here?.lat ?? null,
+    lng: here?.lng ?? null,
+    type: "image/jpeg",
+    blob,
+  };
+  await putPhoto(photo);
+  photos.push(photo);
+  setStatus(source === "auto" ? "Auto photo saved on the current spot." : "Photo saved on the current spot.", "ok");
+  render();
+}
+
+function setAutoPhoto(on) {
+  clearInterval(photoTimer);
+  photoTimer = 0;
+  document.querySelector("#auto-photo").setAttribute("aria-pressed", String(on));
+  document.querySelector("#auto-photo").textContent = on ? "Stop auto photo" : "Auto photo 20s";
+  if (!on) {
+    closeCamera();
+    setStatus("Auto photo is off.", "idle");
+    return;
+  }
+  const shoot = () => {
+    capturePhoto("auto").catch((error) => setStatus(error?.message || "Camera permission is required.", "bad"));
+  };
+  shoot();
+  photoTimer = setInterval(shoot, SAMPLE_MS);
+}
+
+function replayRoute() {
+  clearInterval(replayTimer);
+  const trail = trailPoints();
+  if (trail.length < 2 || !map) {
+    setStatus("A route with at least two points is needed to replay.", "bad");
+    return;
+  }
+  follow = false;
+  followBtn.setAttribute("aria-pressed", "false");
+  if (replayMarker) pathLayer.removeLayer(replayMarker);
+  let index = 0;
+  replayBtn.textContent = "Stop replay";
+  replayTimer = setInterval(() => {
+    const point = trail[index];
+    if (!replayMarker) {
+      replayMarker = L.circleMarker([point.lat, point.lng], {
+        radius: 9,
+        color: "#f6efe4",
+        weight: 2,
+        fillColor: "#24392c",
+        fillOpacity: 1,
+      }).addTo(pathLayer);
+    } else replayMarker.setLatLng([point.lat, point.lng]);
+    map.panTo([point.lat, point.lng]);
+    index += 1;
+    if (index >= trail.length) {
+      clearInterval(replayTimer);
+      replayTimer = 0;
+      replayBtn.textContent = "Replay route";
+    }
+  }, 350);
 }
 
 async function exportLog() {
@@ -475,12 +731,53 @@ async function exportLog() {
 async function clearPhotos() {
   for (const photo of photos) await deletePhoto(photo.id);
   photos = [];
-  setStatus("Gallery copies were removed from this app.", "ok");
+  setStatus("Saved photo copies were removed. Your gallery is unchanged.", "ok");
   render();
 }
 
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("is-on", item === tab));
+    for (const name of ["route", "stays", "photos", "log"]) {
+      document.querySelector(`#panel-${name}`).hidden = name !== tab.dataset.tab;
+    }
+  });
+});
+
 trackBtn.addEventListener("click", () => setTracking(!tracking));
 recordBtn.addEventListener("click", () => takeFix("now"));
+followBtn.addEventListener("click", () => {
+  follow = followBtn.getAttribute("aria-pressed") !== "true";
+  followBtn.setAttribute("aria-pressed", String(follow));
+  if (follow) {
+    const last = latestPoint();
+    if (last && map) map.panTo([last.lat, last.lng]);
+  }
+});
+replayBtn.addEventListener("click", () => {
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = 0;
+    replayBtn.textContent = "Replay route";
+    return;
+  }
+  replayRoute();
+});
+document.querySelector("#open-camera").addEventListener("click", () => {
+  openCamera().catch((error) => setStatus(error?.message || "Camera permission is required.", "bad"));
+});
+document.querySelector("#shutter").addEventListener("click", () => {
+  capturePhoto("camera").catch((error) => setStatus(error?.message || "The photo could not be saved.", "bad"));
+});
+document.querySelector("#close-camera").addEventListener("click", () => {
+  if (photoTimer) setAutoPhoto(false);
+  else closeCamera();
+});
+document.querySelector("#auto-photo").addEventListener("click", () => {
+  setAutoPhoto(document.querySelector("#auto-photo").getAttribute("aria-pressed") !== "true");
+});
+document.querySelector("#load-mock").addEventListener("click", () => loadMock());
+document.querySelector("#clear-mock").addEventListener("click", () => clearMock());
 for (const input of [photoInput, folderInput]) {
   input.addEventListener("change", () => {
     if (input.files?.length) void importPhotos(input.files);
@@ -521,8 +818,8 @@ async function init() {
   render();
   if (tracking) await setTracking(true);
   else {
-    setStatus("Tracking is off until you start it.", "idle");
-    nextEl.textContent = "Hourly saves run while this tab stays open.";
+    setStatus("Tracking is off. Load the sample day or start a real route.", "idle");
+    nextEl.textContent = "While tracking is on, a position is saved every 20 seconds.";
   }
 }
 

@@ -1,8 +1,8 @@
 # Location journal
 
-Android app that saves your location once an hour, maps places you stayed for 30 minutes or more, and plays gallery photos from those visits as slideshows.
+Android app that draws the path you walk, saves a position every 20 seconds plus one hourly fix, maps places you stayed for 30 minutes or more, and plays photos from those visits.
 
-Tracking keeps a notification on screen and records a fix about every five minutes so a half-hour stay can be seen. Photos and the location log stay on the phone.
+Tracking keeps a notification on screen. Take a photo, or turn on a photo every 20 seconds. Load sample day fills the map with a practice route. Photos and the location log stay on the phone.
 
 The debug APK is attached to the GitHub release. Install it with “Install unknown apps” allowed for your browser or file manager. Android 8 or newer.
 

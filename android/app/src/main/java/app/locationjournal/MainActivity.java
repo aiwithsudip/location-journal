@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -50,6 +51,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private PermissionRequest pendingWebPermission;
+
+    private final ActivityResultLauncher<String> cameraLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+                if (pendingWebPermission != null) {
+                    if (granted) pendingWebPermission.grant(pendingWebPermission.getResources());
+                    else pendingWebPermission.deny();
+                    pendingWebPermission = null;
+                }
+                tellPage("window.__onCamera && window.__onCamera()");
+            });
+
+    public void askCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            tellPage("window.__onCamera && window.__onCamera()");
+            return;
+        }
+        cameraLauncher.launch(Manifest.permission.CAMERA);
+    }
+
     private final ActivityResultLauncher<Intent> fileLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (fileCallback == null) return;
@@ -77,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.getSettings().setGeolocationEnabled(false);
+        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
         webView.addJavascriptInterface(new JournalBridge(this), "AndroidJournal");
 
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
@@ -89,6 +111,18 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(request.getResources());
+                        return;
+                    }
+                    pendingWebPermission = request;
+                    cameraLauncher.launch(Manifest.permission.CAMERA);
+                });
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);

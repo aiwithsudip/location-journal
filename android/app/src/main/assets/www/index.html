@@ -10,48 +10,70 @@
 <body>
   <header class="top">
     <div>
-      <p class="eyebrow">Saved on this device</p>
-      <h1>Location journal</h1>
-      <p class="lede">Saves where you are once each hour, maps places you stayed for 30 minutes or more, and plays gallery photos from those visits.</p>
+      <p class="eyebrow">Field journal</p>
+      <h1>Where I went</h1>
+      <p class="lede">Draws the path you walk, keeps an hourly fix, and files photos against places you stayed for 30 minutes or more.</p>
     </div>
-    <div class="actions">
-      <button id="toggle-tracking" type="button" aria-pressed="false">Start tracking</button>
-      <button id="record-now" class="ghost" type="button">Save this hour now</button>
-      <label class="file-btn ghost">
-        Add photos
-        <input id="photo-input" type="file" accept="image/*" multiple />
-      </label>
-      <label class="file-btn ghost">
-        Add a folder
-        <input id="folder-input" type="file" accept="image/*" webkitdirectory directory multiple />
-      </label>
-      <button id="export-log" class="ghost" type="button">Export log</button>
-      <button id="clear-photos" class="ghost" type="button">Remove photos</button>
-    </div>
+    <p id="live-chip" class="chip" data-kind="idle">Idle</p>
   </header>
 
   <section class="stats" aria-label="Summary">
-    <div><strong id="hour-count">0</strong><span>hourly fixes</span></div>
-    <div><strong id="stay-count">0</strong><span>stays of 30 min+</span></div>
-    <div><strong id="photo-count">0</strong><span>photos saved</span></div>
+    <div><strong id="distance-count">0 m</strong><span>distance</span></div>
+    <div><strong id="speed-count">—</strong><span>latest speed</span></div>
+    <div><strong id="fix-count">0</strong><span>track points</span></div>
+    <div><strong id="stay-count">0</strong><span>stays</span></div>
+    <div><strong id="photo-count">0</strong><span>photos</span></div>
   </section>
+
+  <div class="toolbar">
+    <button id="toggle-tracking" type="button" aria-pressed="false">Start tracking</button>
+    <button id="record-now" class="ghost" type="button">Drop a fix</button>
+    <button id="follow-map" class="ghost" type="button" aria-pressed="false">Follow</button>
+    <button id="replay" class="ghost" type="button">Replay route</button>
+    <button id="open-camera" class="ghost" type="button">Take photo</button>
+    <button id="auto-photo" class="ghost" type="button" aria-pressed="false">Auto photo 20s</button>
+    <button id="load-mock" class="ghost" type="button">Load sample day</button>
+    <button id="clear-mock" class="ghost" type="button">Remove sample</button>
+    <label class="file-btn ghost">Gallery<input id="photo-input" type="file" accept="image/*" multiple /></label>
+    <label class="file-btn ghost">Folder<input id="folder-input" type="file" accept="image/*" webkitdirectory directory multiple /></label>
+    <button id="export-log" class="ghost" type="button">Export</button>
+    <button id="clear-photos" class="ghost" type="button">Remove photos</button>
+  </div>
 
   <main class="layout">
     <section class="panel map-wrap">
-      <div id="map" role="region" aria-label="Map of hourly fixes and stays"></div>
-      <p class="map-note">Copper circles are stays of at least 30 minutes. Small dots are the hourly trail.</p>
+      <div id="map" role="region" aria-label="Map of the route, stays, and photos"></div>
+      <p class="map-note">The line is every saved position. Copper rings are stays of 30 minutes or more. A fix is stored every 20 seconds while tracking is on.</p>
+      <div id="camera-sheet" class="camera-sheet" hidden>
+        <video id="camera-preview" playsinline autoplay muted></video>
+        <div class="camera-actions">
+          <button id="shutter" type="button">Capture</button>
+          <button id="close-camera" class="ghost" type="button">Close</button>
+        </div>
+      </div>
     </section>
     <section class="panel side">
       <div class="status-row">
         <p id="status" data-kind="idle">Opening your saved journal…</p>
         <p id="next-hour"></p>
       </div>
-      <h2>Places you stayed</h2>
-      <p class="hint" id="stay-hint">While this page is open, a fix is also taken about every five minutes so a half-hour visit can be seen. The hourly list below is the once-an-hour record.</p>
-      <div id="stays"></div>
-      <div id="loose" hidden></div>
-      <h2>Hourly log</h2>
-      <ol id="hourly-log"></ol>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab is-on" data-tab="route">Route</button>
+        <button type="button" class="tab" data-tab="stays">Stays</button>
+        <button type="button" class="tab" data-tab="photos">Photos</button>
+        <button type="button" class="tab" data-tab="log">Hourly</button>
+      </div>
+      <div id="panel-route" class="tab-panel"></div>
+      <div id="panel-stays" class="tab-panel" hidden>
+        <p class="hint" id="stay-hint">A stay is two or more fixes inside about 200 meters that span at least 30 minutes.</p>
+        <div id="stays"></div>
+      </div>
+      <div id="panel-photos" class="tab-panel" hidden>
+        <div id="loose"></div>
+      </div>
+      <div id="panel-log" class="tab-panel" hidden>
+        <ol id="hourly-log"></ol>
+      </div>
     </section>
   </main>
 

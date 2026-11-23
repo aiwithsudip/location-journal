@@ -52,6 +52,12 @@ export function putPoint(point) {
   });
 }
 
+export function deletePoint(id) {
+  return withStore("points", "readwrite", (store) => {
+    store.delete(id);
+  });
+}
+
 export function getAllPoints() {
   return withStore("points", "readonly", (store) => requestToPromise(store.getAll()));
 }

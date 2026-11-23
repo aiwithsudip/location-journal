@@ -159,3 +159,21 @@ export function formatClock(ms) {
     minute: "2-digit",
   });
 }
+
+/** Length of a track, skipping gaps long enough to be a new outing. */
+export function pathLengthMeters(points) {
+  const sorted = points
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.t))
+    .sort((a, b) => a.t - b.t);
+  let total = 0;
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i].t - sorted[i - 1].t > STAY_MAX_GAP_MS) continue;
+    total += haversineMeters(sorted[i - 1], sorted[i]);
+  }
+  return total;
+}
+
+export function formatDistance(meters) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(meters < 10000 ? 2 : 1)} km`;
+}

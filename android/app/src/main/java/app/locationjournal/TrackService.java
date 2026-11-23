@@ -26,7 +26,7 @@ public class TrackService extends Service {
 
     private static final String CHANNEL = "tracking";
     private static final int NOTICE = 7;
-    private static final long SAMPLE_MS = 5 * 60 * 1000L;
+    private static final long SAMPLE_MS = 20 * 1000L;
 
     private LocationManager locations;
     private LocationListener listener;
@@ -86,7 +86,7 @@ public class TrackService extends Service {
         String provider = provider();
         if (provider == null) return;
         listener = location -> store(location, false);
-        locations.requestLocationUpdates(provider, SAMPLE_MS, 25f, listener, Looper.getMainLooper());
+        locations.requestLocationUpdates(provider, SAMPLE_MS, 0f, listener, Looper.getMainLooper());
         updatesRunning = true;
     }
 
