@@ -1,6 +1,6 @@
 # Location journal
 
-Android app (1.3.0) that draws the path you walk, saves a position every 20 seconds plus one hourly fix, maps places you stayed for 30 minutes or more, and keeps photo copies from those visits.
+Android app (1.4.1) that draws the path you walk, saves a position every 20 seconds plus one hourly fix, maps places you stayed for 30 minutes or more, and keeps photo copies from those visits.
 
 The map is the main screen. Route, Stays, Photos, Hourly, and Reels sit on the bottom bar. Reels is a full-screen vertical player with 10 clips, likes, comments, saves, share, and reshare. Those actions stay on the device. There is no account. Settings holds distance units, appearance, map rings, follow-on-start, optional auto photo, a versioned local backup, and delete. Choose photos uses the Android photo picker. The flashlight is an explicit control in the installed app, shown only from 6 PM to 6 AM local time, and turns off when you leave the camera or the app or when daytime returns. Nothing is uploaded.
 
