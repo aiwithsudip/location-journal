@@ -11,7 +11,7 @@ import {
 import { deletePhoto, deletePoint, getAllPhotos, getAllPoints, getMeta, putPhoto, putPoint, setMeta } from "./db.js";
 import { parseJpegExif } from "./exif.js";
 import { buildMockTrip } from "./mock.js";
-import { formatDistanceUnits, mergeSettings } from "./settings.js";
+import { formatDistanceUnits, isNightTime, mergeSettings } from "./settings.js";
 import { mountReels, pauseReels } from "./reels-ui.js";
 import {
   buildBackup,
@@ -25,6 +25,7 @@ import {
 } from "./backup.js";
 
 const SAMPLE_MS = 20 * 1000;
+const TORCH_VISIBILITY_CHECK_MS = 60 * 1000;
 const GEO_OPTIONS = { enableHighAccuracy: true, maximumAge: 15 * 1000, timeout: 20 * 1000 };
 
 const statusEl = document.querySelector("#status");
@@ -42,6 +43,9 @@ const folderInput = document.querySelector("#folder-input");
 const exportBtn = document.querySelector("#export-log");
 const clearPhotosBtn = document.querySelector("#clear-photos");
 const followBtn = document.querySelector("#follow-map");
+const torchQuick = document.querySelector("#torch-quick");
+const torchCamera = document.querySelector("#torch-camera");
+const torchDetail = document.querySelector("#torch-detail");
 const replayBtn = document.querySelector("#replay");
 const cameraSheet = document.querySelector("#camera-sheet");
 const cameraPreview = document.querySelector("#camera-preview");
@@ -983,22 +987,44 @@ async function clearPhotos() {
 
 function applyTorch(state) {
   const view = torchView(state);
-  for (const id of ["#torch-quick", "#torch-camera"]) {
-    const button = document.querySelector(id);
+  for (const button of [torchQuick, torchCamera]) {
     button.disabled = view.disabled;
     button.setAttribute("aria-pressed", String(view.pressed));
     button.textContent = view.text;
   }
-  document.querySelector("#torch-detail").textContent = view.detail;
+  torchDetail.textContent = view.detail;
+}
+
+function setTorchVisible(visible) {
+  for (const element of [torchQuick, torchCamera, torchDetail]) element.hidden = !visible;
+}
+
+function switchTorchOff() {
+  const native = nativeJournal();
+  if (!native?.setTorch || torchQuick.getAttribute("aria-pressed") !== "true") return;
+  let result = "off";
+  try {
+    result = native.setTorch(false) || "off";
+  } catch {
+    result = "denied";
+  }
+  applyTorch(result);
+}
+
+function updateTorchVisibility() {
+  const night = isNightTime();
+  setTorchVisible(night);
+  if (!night) switchTorchOff();
 }
 
 function toggleTorch() {
+  if (!isNightTime()) return;
   const native = nativeJournal();
   if (!native?.setTorch) {
     applyTorch("unavailable");
     return;
   }
-  const turningOn = document.querySelector("#torch-quick").getAttribute("aria-pressed") !== "true";
+  const turningOn = torchQuick.getAttribute("aria-pressed") !== "true";
   let result = "unavailable";
   try {
     result = native.setTorch(turningOn);
@@ -1012,13 +1038,14 @@ function initTorch() {
   const native = nativeJournal();
   if (!native?.torchState) {
     applyTorch("unavailable");
-    return;
+  } else {
+    try {
+      applyTorch(native.torchState() || "unsupported");
+    } catch {
+      applyTorch("unavailable");
+    }
   }
-  try {
-    applyTorch(native.torchState() || "unsupported");
-  } catch {
-    applyTorch("unavailable");
-  }
+  updateTorchVisibility();
 }
 
 function openViewer(id) {
@@ -1445,6 +1472,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") updateTorchVisibility();
   if (document.visibilityState === "visible" && tracking) {
     const key = hourKey(Date.now());
     if (!points.some((point) => point.id === `hourly:${key}`)) void takeFix("this hour");
@@ -1478,6 +1506,7 @@ async function init() {
   applyTheme();
   syncSettingsForm();
   initTorch();
+  setInterval(updateTorchVisibility, TORCH_VISIBILITY_CHECK_MS);
   if (nativeJournal()) await syncNativePoints();
   tracking = nativeJournal() ? Boolean(nativeJournal().isTracking()) : Boolean(await getMeta("tracking"));
   trackBtn.textContent = tracking ? "Stop tracking" : "Start tracking";

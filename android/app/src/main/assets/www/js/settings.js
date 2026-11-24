@@ -6,6 +6,15 @@ export const DEFAULT_SETTINGS = {
   showStayRings: true,
 };
 
+export const NIGHT_START_HOUR = 18;
+export const NIGHT_END_HOUR = 6;
+
+export function isNightTime(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  const hour = date.getHours();
+  return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
+}
+
 export function mergeSettings(saved) {
   const next = { ...DEFAULT_SETTINGS };
   if (!saved || typeof saved !== "object") return next;
