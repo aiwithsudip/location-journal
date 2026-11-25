@@ -11,7 +11,7 @@ import {
 import { deletePhoto, deletePoint, getAllPhotos, getAllPoints, getMeta, putPhoto, putPoint, setMeta } from "./db.js";
 import { parseJpegExif } from "./exif.js";
 import { buildMockTrip } from "./mock.js";
-import { formatDistanceUnits, isNightTime, mergeSettings } from "./settings.js";
+import { formatDistanceUnits, isNightTime, mergeSettings, nearestSheetStop } from "./settings.js";
 import { mountReels, pauseReels } from "./reels-ui.js";
 import {
   buildBackup,
@@ -996,7 +996,16 @@ function applyTorch(state) {
 }
 
 function setTorchVisible(visible) {
-  for (const element of [torchQuick, torchCamera, torchDetail]) element.hidden = !visible;
+  for (const element of [torchQuick, torchCamera, torchDetail]) {
+    element.hidden = !visible;
+    if (visible) {
+      element.removeAttribute("hidden");
+      element.style.removeProperty("display");
+    } else {
+      element.setAttribute("hidden", "");
+      element.style.display = "none";
+    }
+  }
 }
 
 function switchTorchOff() {
@@ -1013,8 +1022,105 @@ function switchTorchOff() {
 
 function updateTorchVisibility() {
   const night = isNightTime();
+  document.documentElement.classList.toggle("is-day", !night);
   setTorchVisible(night);
   if (!night) switchTorchOff();
+}
+
+const SHEET_STORAGE_KEY = "journal-sheet-stop";
+
+function sheetDocked() {
+  return window.matchMedia("(min-width: 880px)").matches;
+}
+
+function sheetStopHeights() {
+  const view = window.innerHeight;
+  const max = Math.max(160, view - 120);
+  return {
+    map: 48,
+    half: Math.round(Math.min(view * 0.42, 400, max)),
+    full: Math.round(Math.min(view * 0.74, 680, max)),
+  };
+}
+
+function applySheetStop(stop, persist) {
+  const heights = sheetStopHeights();
+  const name = heights[stop] ? stop : "half";
+  const root = document.documentElement;
+  if (sheetDocked()) root.style.removeProperty("--sheet-height");
+  else root.style.setProperty("--sheet-height", `${heights[name]}px`);
+  const handle = document.querySelector("#sheet-handle");
+  if (handle) {
+    const label = name === "map" ? "Map filling the screen" : name === "full" ? "Trip panel expanded" : "Map and trip controls";
+    handle.setAttribute("aria-valuenow", String(heights[name]));
+    handle.setAttribute("aria-valuetext", label);
+  }
+  if (persist) {
+    try { localStorage.setItem(SHEET_STORAGE_KEY, name); } catch { /* private mode */ }
+  }
+  refreshMapSize();
+  setTimeout(refreshMapSize, 220);
+  return name;
+}
+
+let sheetResizeQueued = false;
+function refreshMapSize() {
+  if (!map || sheetResizeQueued) return;
+  sheetResizeQueued = true;
+  requestAnimationFrame(() => {
+    sheetResizeQueued = false;
+    if (map) map.invalidateSize();
+  });
+}
+
+function setupSheet() {
+  const handle = document.querySelector("#sheet-handle");
+  const sheet = document.querySelector(".sheet");
+  if (!handle || !sheet) return;
+  handle.setAttribute("role", "slider");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.setAttribute("aria-valuemin", "48");
+  handle.setAttribute("aria-valuemax", "680");
+  let saved = "half";
+  try { saved = localStorage.getItem(SHEET_STORAGE_KEY) || "half"; } catch { saved = "half"; }
+  applySheetStop(saved, false);
+
+  let drag = null;
+  handle.addEventListener("pointerdown", (event) => {
+    if (sheetDocked() || event.button !== 0) return;
+    drag = { y: event.clientY, height: sheet.getBoundingClientRect().height, moved: false };
+    document.documentElement.classList.add("is-sheet-dragging");
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    const heights = sheetStopHeights();
+    const next = Math.max(heights.map, Math.min(heights.full, drag.height + (drag.y - event.clientY)));
+    if (Math.abs(event.clientY - drag.y) > 4) drag.moved = true;
+    document.documentElement.style.setProperty("--sheet-height", `${Math.round(next)}px`);
+    refreshMapSize();
+  });
+  const finish = () => {
+    if (!drag) return;
+    document.documentElement.classList.remove("is-sheet-dragging");
+    if (!drag.moved) {
+      const order = ["half", "map", "full"];
+      let current = "half";
+      try { current = localStorage.getItem(SHEET_STORAGE_KEY) || "half"; } catch { current = "half"; }
+      const next = order[(Math.max(0, order.indexOf(current)) + 1) % order.length];
+      applySheetStop(next, true);
+    } else {
+      applySheetStop(nearestSheetStop(sheet.getBoundingClientRect().height, sheetStopHeights()), true);
+    }
+    drag = null;
+  };
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  window.addEventListener("resize", () => {
+    let current = "half";
+    try { current = localStorage.getItem(SHEET_STORAGE_KEY) || "half"; } catch { current = "half"; }
+    applySheetStop(current, false);
+  });
 }
 
 function toggleTorch() {
@@ -1499,6 +1605,7 @@ window.__nativeTrackingResult = (ok, message) => {
 
 // Hide night-only controls immediately, before saved journal data is loaded.
 updateTorchVisibility();
+setupSheet();
 
 async function init() {
   points = await getAllPoints();

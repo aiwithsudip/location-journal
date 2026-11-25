@@ -6,6 +6,12 @@
   <title>Location journal</title>
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="css/styles.css" />
+  <script>
+    (function () {
+      var hour = new Date().getHours();
+      if (!(hour >= 20 || hour < 6)) document.documentElement.classList.add("is-day");
+    })();
+  </script>
 </head>
 <body>
   <div id="map" role="region" aria-label="Map of the route and stays"></div>
@@ -30,6 +36,9 @@
   </div>
 
   <section class="sheet" aria-label="Trip">
+    <button id="sheet-handle" class="sheet-handle" type="button" aria-label="Drag to resize the map">
+      <span></span>
+    </button>
     <section class="stats" aria-label="Summary">
       <div><strong id="distance-count">0 m</strong><span>distance</span></div>
       <div><strong id="elapsed-count">—</strong><span>span</span></div>
@@ -157,7 +166,7 @@
             <option value="dark">Dark</option>
           </select>
         </label>
-        <p class="hint">Text follows your system font size. Tracking, selection, and the flashlight use words as well as color.</p>
+        <p class="hint">Text follows your system font size. Tracking and selection use words as well as color. The flashlight button is hidden during the day and appears from 8:00 PM until 6:00 AM.</p>
       </section>
       <section>
         <h3>Privacy and storage</h3>
@@ -170,7 +179,7 @@
       </section>
       <section>
         <h3>About</h3>
-        <p class="hint">Location journal 1.4.2. Route, stays of 30 minutes, hourly fixes, photos, and on-device reels.</p>
+        <p class="hint">Location journal 1.4.3. Route, stays of 30 minutes, hourly fixes, photos, and on-device reels. Drag the trip handle to show more of the map.</p>
       </section>
     </div>
   </div>

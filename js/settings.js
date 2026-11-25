@@ -6,13 +6,28 @@ export const DEFAULT_SETTINGS = {
   showStayRings: true,
 };
 
-export const NIGHT_START_HOUR = 18;
+export const NIGHT_START_HOUR = 20;
 export const NIGHT_END_HOUR = 6;
 
 export function isNightTime(now = new Date()) {
   const date = now instanceof Date ? now : new Date(now);
   const hour = date.getHours();
   return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
+}
+
+export function nearestSheetStop(height, stops) {
+  const entries = Object.entries(stops);
+  if (entries.length === 0 || !Number.isFinite(height)) return "half";
+  let best = entries[0][0];
+  let bestGap = Math.abs(entries[0][1] - height);
+  for (const [name, value] of entries.slice(1)) {
+    const gap = Math.abs(value - height);
+    if (gap < bestGap) {
+      best = name;
+      bestGap = gap;
+    }
+  }
+  return best;
 }
 
 export function mergeSettings(saved) {

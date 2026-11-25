@@ -35,7 +35,7 @@ data class AppSettings(
     val excludeEnd: Long? = null,
     val onboardingComplete: Boolean = false,
     val legacyImportComplete: Boolean = false,
-    val nightStartHour: Int = 18,
+    val nightStartHour: Int = 20,
     val nightEndHour: Int = 6,
 )
 
@@ -77,7 +77,7 @@ class AppPreferences(private val context: Context) {
                 excludeEnd = prefs[Keys.EXCLUDE_END],
                 onboardingComplete = prefs[Keys.ONBOARDING] ?: false,
                 legacyImportComplete = prefs[Keys.LEGACY_IMPORT] ?: false,
-                nightStartHour = (prefs[Keys.NIGHT_START] ?: 18).coerceIn(0, 23),
+                nightStartHour = (prefs[Keys.NIGHT_START] ?: 20).coerceIn(0, 23),
                 nightEndHour = (prefs[Keys.NIGHT_END] ?: 6).coerceIn(0, 23),
             )
         }
@@ -99,7 +99,7 @@ class AppPreferences(private val context: Context) {
                 excludeEnd = prefs[Keys.EXCLUDE_END],
                 onboardingComplete = prefs[Keys.ONBOARDING] ?: false,
                 legacyImportComplete = prefs[Keys.LEGACY_IMPORT] ?: false,
-                nightStartHour = prefs[Keys.NIGHT_START] ?: 18,
+                nightStartHour = prefs[Keys.NIGHT_START] ?: 20,
                 nightEndHour = prefs[Keys.NIGHT_END] ?: 6,
             )
             val next = transform(current)

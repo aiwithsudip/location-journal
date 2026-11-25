@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatDistanceUnits, isNightTime, mergeSettings, upgradePlan } from "./settings.js";
+import { formatDistanceUnits, isNightTime, mergeSettings, nearestSheetStop, upgradePlan } from "./settings.js";
 import {
   buildBackup,
   buildGpx,
@@ -17,13 +17,17 @@ assert.equal(mergeSettings({ units: "mi", theme: "dark", followOnStart: false, a
 assert.equal(mergeSettings({ units: "furlongs", theme: "neon" }).units, "km");
 assert.equal(mergeSettings({ units: "furlongs", theme: "neon" }).theme, "system");
 
-assert.equal(isNightTime(new Date(2026, 0, 1, 17, 59)), false);
-assert.equal(isNightTime(new Date(2026, 0, 1, 18, 0)), true);
+assert.equal(isNightTime(new Date(2026, 0, 1, 17, 25)), false);
+assert.equal(isNightTime(new Date(2026, 0, 1, 19, 59)), false);
+assert.equal(isNightTime(new Date(2026, 0, 1, 20, 0)), true);
 assert.equal(isNightTime(new Date(2026, 0, 1, 23, 59)), true);
 assert.equal(isNightTime(new Date(2026, 0, 1, 0, 0)), true);
 assert.equal(isNightTime(new Date(2026, 0, 1, 5, 59)), true);
 assert.equal(isNightTime(new Date(2026, 0, 1, 6, 0)), false);
 assert.equal(isNightTime(new Date(2026, 0, 1, 12, 0)), false);
+assert.equal(nearestSheetStop(40, { map: 48, half: 360, full: 640 }), "map");
+assert.equal(nearestSheetStop(300, { map: 48, half: 360, full: 640 }), "half");
+assert.equal(nearestSheetStop(600, { map: 48, half: 360, full: 640 }), "full");
 
 assert.equal(formatDistanceUnits(500, "km"), "500 m");
 assert.equal(formatDistanceUnits(1609.344, "mi"), "1.00 mi");

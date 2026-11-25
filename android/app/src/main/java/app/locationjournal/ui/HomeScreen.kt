@@ -113,7 +113,7 @@ fun HomeScreen(viewModel: JournalViewModel, nav: NavController) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Flashlight", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Available from 6 PM to 6 AM. It turns itself off when daytime returns.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Available from 8 PM to 6 AM. It turns itself off when daytime returns.", style = MaterialTheme.typography.bodyMedium)
                     Button(
                         onClick = viewModel::toggleTorch,
                         modifier = Modifier.fillMaxWidth(),

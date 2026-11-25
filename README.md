@@ -30,7 +30,7 @@ packaged in the APK and are not the app interface.
   `points.json` and legacy IndexedDB stores.
 - Reels with local bundled clips, likes, saves, views, comments, share/reshare counters, mute, and
   playback through Media3. These interactions stay on-device.
-- Night-only flashlight control using the camera torch API. It turns itself off when the app stops
+- Night-only flashlight control from 8:00 PM until 6:00 AM, using the camera torch API. It turns itself off when the app stops
   or the callback reports the torch unavailable.
 - Distance units, theme, tracking/stay thresholds, visible rings, follow-on-start, optional auto
   photo, night hours, and a privacy exclusion window.
