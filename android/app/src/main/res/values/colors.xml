@@ -2,4 +2,5 @@
 <resources>
     <color name="ink">#241C16</color>
     <color name="copper">#B5522A</color>
+    <color name="surface">#F7F1E6</color>
 </resources>

@@ -1,0 +1,664 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "74a37b95b064e21f456a22bff513f643",
+    "entities": [
+      {
+        "tableName": "points",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `t` INTEGER NOT NULL, `lat` REAL NOT NULL, `lng` REAL NOT NULL, `accuracy` REAL NOT NULL, `altitude` REAL, `speed` REAL, `bearing` REAL, `kind` TEXT NOT NULL, `hour` TEXT, `source` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "t",
+            "columnName": "t",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lng",
+            "columnName": "lng",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accuracy",
+            "columnName": "accuracy",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "altitude",
+            "columnName": "altitude",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "speed",
+            "columnName": "speed",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "bearing",
+            "columnName": "bearing",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hour",
+            "columnName": "hour",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_points_t",
+            "unique": false,
+            "columnNames": [
+              "t"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_t` ON `${TABLE_NAME}` (`t`)"
+          },
+          {
+            "name": "index_points_kind",
+            "unique": false,
+            "columnNames": [
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_kind` ON `${TABLE_NAME}` (`kind`)"
+          },
+          {
+            "name": "index_points_hour",
+            "unique": false,
+            "columnNames": [
+              "hour"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_points_hour` ON `${TABLE_NAME}` (`hour`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `lat` REAL NOT NULL, `lng` REAL NOT NULL, `name` TEXT, `category` TEXT NOT NULL, `visitCount` INTEGER NOT NULL, `totalDurationMs` INTEGER NOT NULL, `firstSeen` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, `mergedInto` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lng",
+            "columnName": "lng",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visitCount",
+            "columnName": "visitCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalDurationMs",
+            "columnName": "totalDurationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeen",
+            "columnName": "firstSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeen",
+            "columnName": "lastSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mergedInto",
+            "columnName": "mergedInto",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_places_name",
+            "unique": false,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_places_name` ON `${TABLE_NAME}` (`name`)"
+          },
+          {
+            "name": "index_places_lastSeen",
+            "unique": false,
+            "columnNames": [
+              "lastSeen"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_places_lastSeen` ON `${TABLE_NAME}` (`lastSeen`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "visits",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `placeId` TEXT NOT NULL, `day` TEXT NOT NULL, `start` INTEGER NOT NULL, `end` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `lat` REAL NOT NULL, `lng` REAL NOT NULL, `samples` INTEGER NOT NULL, `confidence` REAL NOT NULL, `title` TEXT, `note` TEXT, `category` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "day",
+            "columnName": "day",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lng",
+            "columnName": "lng",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "samples",
+            "columnName": "samples",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_visits_start",
+            "unique": false,
+            "columnNames": [
+              "start"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_visits_start` ON `${TABLE_NAME}` (`start`)"
+          },
+          {
+            "name": "index_visits_placeId",
+            "unique": false,
+            "columnNames": [
+              "placeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_visits_placeId` ON `${TABLE_NAME}` (`placeId`)"
+          },
+          {
+            "name": "index_visits_day",
+            "unique": false,
+            "columnNames": [
+              "day"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_visits_day` ON `${TABLE_NAME}` (`day`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "photos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `appPath` TEXT, `sourceUri` TEXT, `t` INTEGER, `lat` REAL, `lng` REAL, `caption` TEXT, `label` TEXT, `favorite` INTEGER NOT NULL, `placeId` TEXT, `visitId` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appPath",
+            "columnName": "appPath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "sourceUri",
+            "columnName": "sourceUri",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "t",
+            "columnName": "t",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lng",
+            "columnName": "lng",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "caption",
+            "columnName": "caption",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "visitId",
+            "columnName": "visitId",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_photos_t",
+            "unique": false,
+            "columnNames": [
+              "t"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_photos_t` ON `${TABLE_NAME}` (`t`)"
+          },
+          {
+            "name": "index_photos_placeId",
+            "unique": false,
+            "columnNames": [
+              "placeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_photos_placeId` ON `${TABLE_NAME}` (`placeId`)"
+          },
+          {
+            "name": "index_photos_visitId",
+            "unique": false,
+            "columnNames": [
+              "visitId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_photos_visitId` ON `${TABLE_NAME}` (`visitId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "journal_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `body` TEXT NOT NULL, `category` TEXT, `time` INTEGER NOT NULL, `placeId` TEXT, `visitId` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "visitId",
+            "columnName": "visitId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_journal_entries_time",
+            "unique": false,
+            "columnNames": [
+              "time"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_journal_entries_time` ON `${TABLE_NAME}` (`time`)"
+          },
+          {
+            "name": "index_journal_entries_placeId",
+            "unique": false,
+            "columnNames": [
+              "placeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_journal_entries_placeId` ON `${TABLE_NAME}` (`placeId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "reel_states",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `liked` INTEGER NOT NULL, `saved` INTEGER NOT NULL, `likes` INTEGER NOT NULL, `views` INTEGER NOT NULL, `shares` INTEGER NOT NULL, `reshares` INTEGER NOT NULL, `index` INTEGER NOT NULL, `muted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "liked",
+            "columnName": "liked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "saved",
+            "columnName": "saved",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "likes",
+            "columnName": "likes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "views",
+            "columnName": "views",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shares",
+            "columnName": "shares",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reshares",
+            "columnName": "reshares",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "index",
+            "columnName": "index",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "muted",
+            "columnName": "muted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "reel_comments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `reelId` TEXT NOT NULL, `author` TEXT NOT NULL, `text` TEXT NOT NULL, `time` INTEGER NOT NULL, `mine` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reelId",
+            "columnName": "reelId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "author",
+            "columnName": "author",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mine",
+            "columnName": "mine",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reel_comments_reelId",
+            "unique": false,
+            "columnNames": [
+              "reelId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reel_comments_reelId` ON `${TABLE_NAME}` (`reelId`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '74a37b95b064e21f456a22bff513f643')"
+    ]
+  }
+}

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Location journal</string>
-    <string name="tracking_notice">Location journal is saving where you are.</string>
+    <string name="tracking_notice">Tracking is active. Your location is saved on this device.</string>
+    <string name="tracking_paused_notice">Tracking is paused. No new points are being saved.</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_stop">Stop</string>
+    <string name="channel_tracking">Location tracking</string>
+    <string name="channel_tracking_description">Shown while background tracking is active.</string>
 </resources>
