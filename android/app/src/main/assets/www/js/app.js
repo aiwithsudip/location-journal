@@ -1497,6 +1497,9 @@ window.__nativeTrackingResult = (ok, message) => {
   }
 };
 
+// Hide night-only controls immediately, before saved journal data is loaded.
+updateTorchVisibility();
+
 async function init() {
   points = await getAllPoints();
   photos = await getAllPhotos();

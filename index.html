@@ -43,10 +43,10 @@
       <button id="open-camera" type="button">Add photo</button>
       <button id="record-now" type="button">Save fix</button>
       <button id="follow-map" type="button" aria-pressed="false">Follow</button>
-      <button id="torch-quick" type="button" aria-pressed="false">Flashlight</button>
+      <button id="torch-quick" type="button" aria-pressed="false" hidden>Flashlight</button>
     </div>
     <p id="next-hour"></p>
-    <p id="torch-detail" class="hint" role="status"></p>
+    <p id="torch-detail" class="hint" role="status" hidden></p>
     <div class="sheet-body">
       <div id="panel-route" class="tab-panel"></div>
       <div id="panel-stays" class="tab-panel" hidden>
@@ -96,7 +96,7 @@
     <video id="camera-preview" playsinline autoplay muted aria-label="Camera preview"></video>
     <div class="camera-actions">
       <button id="shutter" type="button">Capture</button>
-      <button id="torch-camera" type="button" aria-pressed="false">Flashlight</button>
+      <button id="torch-camera" type="button" aria-pressed="false" hidden>Flashlight</button>
       <button id="close-camera" type="button">Close</button>
     </div>
   </div>
@@ -170,7 +170,7 @@
       </section>
       <section>
         <h3>About</h3>
-        <p class="hint">Location journal 1.4.1. Route, stays of 30 minutes, hourly fixes, photos, and on-device reels.</p>
+        <p class="hint">Location journal 1.4.2. Route, stays of 30 minutes, hourly fixes, photos, and on-device reels.</p>
       </section>
     </div>
   </div>
